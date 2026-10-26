@@ -1378,9 +1378,13 @@ function registerIpc(deps) {
     if (!addonManager) return { ok: false, errors: ['Addon-Manager nicht verfügbar.'] };
     const win = getWindow();
     const res = await dialog.showOpenDialog(win, {
-      title: 'Addon-Ordner oder manifest.json auswählen',
-      defaultPath: path.dirname(addonManager.getAddonsDirectory()),
-      properties: ['openDirectory']
+      title: 'SQL Hub Addon-Datei (.js) auswählen',
+      defaultPath: addonManager.getAddonsDirectory(),
+      properties: ['openFile'],
+      filters: [
+        { name: 'SQL Hub Addon (*.js)', extensions: ['js'] },
+        { name: 'Alle Dateien', extensions: ['*'] }
+      ]
     });
     if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
     const installed = addonManager.installFromPath(res.filePaths[0]);
@@ -1392,9 +1396,13 @@ function registerIpc(deps) {
     if (!addonManager) return { ok: false, errors: ['Addon-Manager nicht verfügbar.'] };
     const win = getWindow();
     const res = await dialog.showOpenDialog(win, {
-      title: 'Addon-Ordner zur Installation auswählen',
-      defaultPath: path.dirname(addonManager.getAddonsDirectory()),
-      properties: ['openDirectory']
+      title: 'SQL Hub Addon-Datei (.js) zur Installation auswählen',
+      defaultPath: addonManager.getAddonsDirectory(),
+      properties: ['openFile'],
+      filters: [
+        { name: 'SQL Hub Addon (*.js)', extensions: ['js'] },
+        { name: 'Alle Dateien', extensions: ['*'] }
+      ]
     });
     if (res.canceled || res.filePaths.length === 0) return { ok: false, canceled: true };
     return addonManager.inspectFromPath(res.filePaths[0]);
@@ -1493,6 +1501,10 @@ function registerIpc(deps) {
     const target = subFolder && fs.existsSync(subFolder)
       ? subFolder
       : addonManager.getAddonsDirectory();
+    if (fs.existsSync(target) && fs.statSync(target).isFile()) {
+      shell.showItemInFolder(target);
+      return { ok: true, path: target };
+    }
     fs.mkdirSync(target, { recursive: true });
     await shell.openPath(target);
     return { ok: true, path: target };

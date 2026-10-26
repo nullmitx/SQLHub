@@ -1,21 +1,21 @@
 'use strict';
 
 /**
- * Addon-Manager für SQL Hub (v2.4.3).
+ * SQL Hub – Single-File Addon-Manager (.js).
  *
- * Ermöglicht das Erstellen, Installieren, Aktivieren/Deaktivieren und Deinstallieren
- * von Addons (Design-Themes, Sidebar-Werkzeuge unter SFTP, Musik-/Video-/YouTube-Player u.v.m.).
+ * Jedes Addon besteht aus einer EINZIGEN JavaScript-Datei (z. B. `meinaddon.js`).
+ * In dieser einen `.js`-Datei sind Metadaten (id, name, version, type, sidebar),
+ * CSS-Design (`styles`), HTML-Oberfläche (`html`) und die JavaScript-Logik
+ * (`mount(addonRoot, addonApi)`) komplett vereint.
  *
- * Primärer Addon-Ordner (unter Windows wie gewünscht):
- *   C:\Users\lucsc\OneDrive\Desktop\SQLHubAddons
- * Zusätzlicher Test-/Entwicklungsordner für das Musik-Addon:
- *   C:\Users\lucsc\OneDrive\Desktop\MusikAddon
- * Fallback (macOS / Linux / andere Systeme):
- *   ~/Desktop/SQLHubAddons bzw. <userData>/addons
+ * Wichtig:
+ * - Alle Addons sind standardmäßig DEAKTIVIERT (`enabled: false`) und müssen vom
+ *   Nutzer im Addons-Fenster manuell per Schalter aktiviert werden.
  */
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const vm = require('vm');
 const { pathToFileURL } = require('url');
 
 const EXPLICIT_WINDOWS_ADDONS_DIR = 'C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons';
@@ -25,11 +25,22 @@ const MEDIA_EXTENSIONS = new Set([
   '.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac', '.opus', '.webm', '.mp4'
 ]);
 
+function sanitizeAddonId(raw) {
+  return String(raw || '')
+    .toLowerCase()
+    .replace(/\.js$/i, '')
+    .replace(/[^a-z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 48) || 'custom-addon';
+}
+
 function resolvePrimaryAddonsDir(userDataDir) {
   if (process.platform === 'win32') {
     try {
       const parent = path.dirname(EXPLICIT_WINDOWS_ADDONS_DIR);
       if (fs.existsSync(parent)) {
+        fs.mkdirSync(EXPLICIT_WINDOWS_ADDONS_DIR, { recursive: true });
         return EXPLICIT_WINDOWS_ADDONS_DIR;
       }
     } catch {
@@ -38,282 +49,352 @@ function resolvePrimaryAddonsDir(userDataDir) {
   }
   const desktopDir = path.join(os.homedir(), 'Desktop');
   if (fs.existsSync(desktopDir)) {
-    return path.join(desktopDir, 'SQLHubAddons');
+    const candidate = path.join(desktopDir, 'SQLHubAddons');
+    try {
+      fs.mkdirSync(candidate, { recursive: true });
+      return candidate;
+    } catch {
+      /* fallback below */
+    }
   }
-  return path.join(userDataDir || os.homedir(), 'SQLHubAddons');
+  const fallback = path.join(userDataDir || os.tmpdir(), 'SQLHubAddons');
+  fs.mkdirSync(fallback, { recursive: true });
+  return fallback;
 }
 
-const GUIDE_MARKDOWN = `# SQL Hub – Offizielles Handbuch zur Addon-Entwicklung (v2.4.3)
+/* ============================================================================
+ * AUSFÜHRLICHE ENTWICKLER-ANLEITUNG (1-DATEI-SYSTEM: meinaddon.js)
+ * ========================================================================== */
 
-Willkommen im **SQL Hub Addon-System**!  
-Mit Addons hast du in **SQL Hub** volle Freiheit: Du kannst eigene **Design-Themes** gestalten, neue **Werkzeuge unter \`SFTP\`** in die linke Seitenleiste einfügen oder sogar komplexe Multimedia-Apps wie einen **Musik-Player (Spotify-/YouTube-Stil)**, **Video-Player**, **Server-Monitor** oder **Notiz-Manager** bauen.
+const GUIDE_MARKDOWN = `# SQL Hub – Offizielles Handbuch zur Addon-Entwicklung (1-Datei-System \`meinaddon.js\`)
 
----
-
-## Inhaltsverzeichnis
-
-1. [Wo liegen die Addons?](#1-wo-liegen-die-addons)
-2. [Aufbau eines Addon-Ordners](#2-aufbau-eines-addon-ordners)
-3. [Die \`manifest.json\` im Detail (Alle Optionen)](#3-die-manifestjson-im-detail-alle-optionen)
-4. [Die JavaScript-Schnittstelle \`addonApi\` (Volle Freiheit)](#4-die-javascript-schnittstelle-addonapi-volle-freiheit)
-5. [Hintergrund-Wiedergabe (\`keepAlive: true\`) für Musik & Streams](#5-hintergrund-wiedergabe-keepalive-true-für-musik--streams)
-6. [Tutorial 1: Eigenes Design- / Theme-Addon erstellen](#6-tutorial-1-eigenes-design---theme-addon-erstellen)
-7. [Tutorial 2: Eigenes Sidebar-Werkzeug (z. B. Server-Checkliste) erstellen](#7-tutorial-2-eigenes-sidebar-werkzeug-z-b-server-checkliste-erstellen)
-8. [Tutorial 3: Eigenen Musik-, Radio- & YouTube/Spotify-Player bauen](#8-tutorial-3-eigenen-musik--radio---youtube-spotify-player-bauen)
-9. [Installation & Deinstallation über den Custom-Assistenten](#9-installation--deinstallation-über-den-custom-assistenten)
+Mit dem **SQL Hub Single-File Addon-System (ab v2.4.4)** brauchst du **keine 3 oder 4 einzelnen Dateien** mehr!
+Ein komplettes Addon – egal ob **Design-Theme**, **Sidebar-Werkzeug unter SFTP** oder ein ausgewachsener **Musik-, Radio-, YouTube- & Spotify-Player** – besteht aus **einer einzigen JavaScript-Datei**, z. B. **\`meinaddon.js\`**.
 
 ---
 
-## 1. Wo liegen die Addons?
+## 1. Wie erstelle und installiere ich ein Addon? (In 3 Schritten)
 
-SQL Hub lädt alle Addons automatisch aus diesem Hauptordner:
-\`\`\`text
-C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons
-\`\`\`
-Zusätzlich kannst du jeden beliebigen Ordner auf deinem PC (z. B. \`C:\\Users\\lucsc\\OneDrive\\Desktop\\MusikAddon\`) direkt in SQL Hub über **Addons (über Tresor) → Addon installieren** mit dem **Custom-Installations-Assistenten** prüfen und installieren.
-
----
-
-## 2. Aufbau eines Addon-Ordners
-
-Jedes Addon ist ein eigener Unterordner und besteht aus bis zu **4 einfachen Dateien**:
-
-\`\`\`text
-MeinEigenesAddon/
-├── manifest.json     (Pflicht: Name, Version, Icon, Typ & Einstellungen)
-├── styles.css        (Optional: Eigene CSS-Styles für deine Ansicht oder das gesamte App-Design)
-├── view.html         (Optional: Dein eigenes HTML-Layout für die Seite unter SFTP)
-└── script.js         (Optional: Dein eigener JavaScript-Code für Musik, Buttons, API, Speicher usw.)
-\`\`\`
+1. **Datei in VS Code erstellen**:
+   Öffne Visual Studio Code (oder einen beliebigen Texteditor) und erstelle **eine einzige Datei**, z. B. \`meinaddon.js\`.
+2. **Code einfügen & speichern**:
+   Schreibe dein Addon als \`export default { ... }\` (siehe Vorlagen unten) in \`meinaddon.js\` und speichere die Datei.
+3. **In SQL Hub auswählen & aktivieren**:
+   - Öffne **SQL Hub** und klicke links unten (über \`Tresor\`) auf **\`Addons\`**.
+   - Klicke oben auf **\`+ Addon hinzufügen (.js wählen)\`** und wähle deine Datei \`meinaddon.js\` aus.
+   - Das Addon wird sofort installiert. Da alle Addons aus Sicherheitsgründen **standardmäßig deaktiviert** sind, schaltest du es einfach rechts auf der Karte per Schalter ein!
 
 ---
 
-## 3. Die \`manifest.json\` im Detail (Alle Optionen)
+## 2. Aufbau einer \`meinaddon.js\` Datei
 
-\`\`\`json
-{
-  "id": "mein-musik-addon",
-  "name": "Mein Musik & Stream Player",
-  "version": "1.0.0",
-  "author": "Dein Name",
-  "description": "Spielt lokale MP3s, Web-Radio, Spotify-Embeds und YouTube-Streams ab.",
-  "type": "tool",
-  "enabledByDefault": true,
-  "styleFile": "styles.css",
-  "permissions": [
-    "sidebar",
-    "audio-video",
-    "storage",
-    "local-media",
-    "external-embeds"
-  ],
-  "sidebar": {
-    "label": "Musik",
-    "title": "Musik & Stream Studio",
-    "subtitle": "Spotify-Deck, YouTube-Player, Web-Radio & lokale MP3s",
-    "icon": "music",
-    "template": "custom",
-    "keepAlive": true,
-    "viewFile": "view.html",
-    "scriptFile": "script.js"
-  }
-}
-\`\`\`
+Alles (Metadaten, CSS-Styles, HTML-Ansicht und JavaScript-Logik) steht übersichtlich in **einer einzigen \`.js\`-Datei**:
 
-### Erklärung der wichtigsten Felder:
-- **\`type\`**:
-  - \`"tool"\`: Fügt ein neues Icon direkt **unter \`SFTP\`** in der linken Seitenleiste hinzu.
-  - \`"theme"\`: Verändert das Design / die Farben der gesamten App über \`styles.css\`.
-  - \`"hybrid"\`: Kombiniert ein eigenes Sidebar-Icon unter \`SFTP\` mit globalem App-Design.
-- **\`sidebar.icon\`**: Name des Icons in der Seitenleiste. Verfügbare Icons:
-  - \`"music"\` (Musiknote), \`"file-text"\` (Notiz), \`"terminal"\` (Konsole), \`"clipboard"\` (Klemmbrett), \`"gamepad-2"\` (Controller), \`"rocket"\` (Rakete), \`"bot"\` (Bot), \`"sparkles"\` (Sterne), \`"layers"\` (Ebenen), \`"wrench"\` (Werkzeug), \`"globe"\` (Weltkugel), \`"database"\` (Datenbank), \`"server"\` (Server), \`"cloud"\` (Cloud).
-- **\`sidebar.template\`**:
-  - \`"custom"\`: Lädt deine eigene \`view.html\` und führt deine \`script.js\` aus (volle Freiheit für Musik-Player, Videos, Iframes, Canvas, eigene Formulare!).
-  - \`"notes"\`: Nutzt das fertige Notizen- & SQL-Snippet-System von SQL Hub.
-- **\`sidebar.keepAlive\`** (\`true\` / \`false\`):
-  - Wenn \`true\` gesetzt ist, bleibt deine Addon-Seite im Hintergrund aktiv, wenn du zu \`Start\`, \`Instanzen\`, \`Sitzungen\` oder \`SFTP\` wechselst. **Perfekt für Musik-Player, Radio-Streams oder Timer, damit die Musik ohne Unterbrechung weiterläuft!**
+\`\`\`javascript
+// meinaddon.js – Komplettes SQL Hub Addon in einer einzigen Datei!
 
----
+export default {
+  // 1. PFLICHTFELDER & METADATEN
+  id: 'mein-server-tool',
+  name: 'Mein Server-Werkzeug',
+  version: '1.0.0',
+  author: 'Dein Name',
+  description: 'Fügt unter SFTP ein eigenes Werkzeug mit Speicher-Funktion hinzu.',
+  type: 'tool', // 'tool' (Sidebar-Icon unter SFTP), 'theme' (Design) oder 'hybrid' (beides)
 
-## 4. Die JavaScript-Schnittstelle \`addonApi\` (Volle Freiheit)
-
-Wenn du \`"template": "custom"\` nutzt, bekommt deine \`script.js\` automatisch zwei Objekte übergeben:
-1. **\`addonRoot\`**: Das DOM-Element (\`HTMLElement\`) deiner Addon-Seite (\`addonRoot.querySelector(...)\`).
-2. **\`addonApi\`**: Das mächtige SQL Hub Addon-SDK mit folgenden Funktionen:
-
-| Methode | Beschreibung |
-| :--- | :--- |
-| \`await addonApi.getStorage()\` | Lädt dein dauerhaft gespeichertes JSON-Objekt (z. B. Playlists, Notizen, Lautstärke). |
-| \`await addonApi.setStorage(obj)\` | Speichert beliebige JSON-Daten dauerhaft für dein Addon. |
-| \`await addonApi.pickMediaFiles()\` | Öffnet den Dateidialog für Audio-/Videodateien (\`.mp3\`, \`.wav\`, \`.ogg\`, \`.flac\`, \`.m4a\`, \`.mp4\`, \`.webm\`) und gibt \`[{ name, path, fileUrl, size }]\` zurück. |
-| \`await addonApi.pickMediaFolder()\` | Öffnet einen Ordnerdialog, durchsucht ihn nach Musik-/Videodateien und gibt \`{ folderPath, tracks: [...] }\` zurück. |
-| \`addonApi.setMiniPlayer(config)\` | Zeigt unten rechts in SQL Hub eine schwebende Mini-Player-Leiste an, während man in anderen Ansichten arbeitet (\`{ active: true, title, subtitle, playing, onToggle, onNext, onOpen }\`). |
-| \`addonApi.toast(msg, type, title)\` | Zeigt eine Benachrichtigung an (\`type\`: \`'info'\`, \`'success'\`, \`'warning'\`, \`'error'\`). |
-| \`await addonApi.copyClipboard(text)\` | Kopiert Text direkt in die Zwischenablage. |
-| \`await addonApi.getProfiles()\` | Liefert die Liste aller gespeicherten Datenbank-Instanzen. |
-| \`addonApi.navigate(viewName)\` | Wechselt zu einer anderen Ansicht (\`'dashboard'\`, \`'profiles'\`, \`'sftp'\`, \`'addons'\`). |
-
----
-
-## 5. Hintergrund-Wiedergabe (\`keepAlive: true\`) für Musik & Streams
-
-Dank \`"keepAlive": true\` in der \`manifest.json\` wird der DOM-Container deines Addons beim Wechsel auf \`Start\` oder \`SFTP\` **nicht zerstört**, sondern nur unsichtbar geschaltet. Dadurch laufen:
-- HTML5 \`<audio>\` und \`<video>\` Elemente,
-- Web-Audio-API Visualizer & Synthesizer,
-- sowie eingebettete \`<iframe>\`-Player (YouTube / Spotify / SoundCloud)
-**unterbrechungsfrei im Hintergrund weiter!**
-
----
-
-## 6. Tutorial 1: Eigenes Design- / Theme-Addon erstellen
-
-Erstelle einen Ordner \`SQLHubAddons/mein-cyber-theme/\` mit:
-
-### \`manifest.json\`
-\`\`\`json
-{
-  "id": "mein-cyber-theme",
-  "name": "Cyber Neon Theme",
-  "version": "1.0.0",
-  "author": "Luc",
-  "description": "Verpasst SQL Hub ein violett-blaues Neon-Design.",
-  "type": "theme",
-  "enabledByDefault": false,
-  "styleFile": "styles.css"
-}
-\`\`\`
-
-### \`styles.css\`
-\`\`\`css
-:root {
-  --primary: #8b5cf6 !important;
-  --primary-hover: #7c3aed !important;
-  --accent: #06b6d4 !important;
-  --bg-app: #090812 !important;
-  --surface: #121024 !important;
-}
-\`\`\`
-
----
-
-## 7. Tutorial 2: Eigenes Sidebar-Werkzeug (z. B. Server-Checkliste) erstellen
-
-Erstelle einen Ordner \`SQLHubAddons/server-checkliste/\` mit \`manifest.json\`, \`view.html\` und \`script.js\`:
-
-### \`view.html\`
-\`\`\`html
-<div class="panel">
-  <h2>Meine Server-Checkliste</h2>
-  <p class="panel__desc">Wichtige Schritte vor jedem Datenbank-Update:</p>
-  <textarea id="cl-input" class="input" rows="8" placeholder="Aufgaben eintragen …"></textarea>
-  <div style="margin-top:12px;">
-    <button type="button" class="btn btn--primary" id="cl-save">Speichern</button>
-  </div>
-</div>
-\`\`\`
-
-### \`script.js\`
-\`\`\`js
-(async () => {
-  const input = addonRoot.querySelector('#cl-input');
-  const btn = addonRoot.querySelector('#cl-save');
-  const data = await addonApi.getStorage();
-  if (data && data.text) input.value = data.text;
-
-  btn.addEventListener('click', async () => {
-    await addonApi.setStorage({ text: input.value });
-    addonApi.toast('Checkliste gespeichert!', 'success');
-  });
-})();
-\`\`\`
-
----
-
-## 8. Tutorial 3: Eigenen Musik-, Radio- & YouTube/Spotify-Player bauen
-
-Ein vollständiges, sofort einsatzbereites Referenz-Projekt findest du direkt auf deinem Desktop unter:
-- \`C:\\Users\\lucsc\\OneDrive\\Desktop\\MusikAddon\`
-- sowie installiert unter \`C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\MusikAddon\`
-
-Dort siehst du im echten Code (\`manifest.json\`, \`styles.css\`, \`view.html\`, \`script.js\`), wie man:
-1. Lokale Audiodateien (\`.mp3\`, \`.wav\`, \`.flac\`, \`.mp4\`) und ganze Musik-Ordner lädt,
-2. Live-Radio-Streams und einen Web-Audio-Synthesizer mit **28-Band-Canvas-Equalizer** abspielt,
-3. **YouTube-Videos/Playlists** und **Spotify-Links** direkt einbettet,
-4. und über \`addonApi.setMiniPlayer(...)\` eine schwebende Mini-Player-Steuerung in SQL Hub einblendet!
-
----
-
-## 9. Installation & Deinstallation über den Custom-Assistenten
-
-1. Öffne in SQL Hub links unten **\`Addons\`** (direkt über \`Tresor\`).
-2. Klicke oben rechts auf **\`Addon installieren\`**, um das **Custom-Installations-Fenster** zu öffnen.
-3. Wähle deinen Addon-Ordner (z. B. \`C:\\Users\\lucsc\\OneDrive\\Desktop\\MusikAddon\`), prüfe die Berechtigungen & Dateien in der Vorschau und klicke auf **Jetzt installieren**.
-4. Zum Entfernen klickst du bei einem Addon auf **\`Deinstallieren\`** – im **Custom-Deinstallations-Fenster** kannst du auswählen, ob auch die gespeicherten Addon-Daten bereinigt werden sollen.
-`;
-
-const DEFAULT_NOTES_MANIFEST = {
-  id: 'sqlhub-notes',
-  name: 'Notizen & SQL-Snippets',
-  version: '1.3.0',
-  author: 'SQL Hub Team',
-  description: 'Fügt unter SFTP einen eigenen Bereich „Notizen“ hinzu, in dem du Server-Notizen, Zugangs-Hinweise, To-Dos und häufig genutzte SQL-Abfragen speichern, durchsuchen und mit einem Klick kopieren kannst.',
-  type: 'tool',
-  enabledByDefault: false,
-  styleFile: 'styles.css',
-  permissions: ['sidebar', 'storage', 'clipboard'],
+  // 2. SIDEBAR-KONFIGURATION (erscheint bei Aktivierung direkt unter SFTP)
   sidebar: {
-    label: 'Notizen',
-    title: 'Notizen & SQL-Snippets',
-    subtitle: 'Persönliches Scratchpad für Datenbank-Abfragen, Server-Doku & Aufgaben',
-    icon: 'file-text',
-    template: 'notes'
+    label: 'Mein Tool',                        // Kurzer Text unter dem Sidebar-Icon
+    title: 'Mein Server-Werkzeug',             // Große Überschrift im Fenster
+    subtitle: 'Geladen aus einer einzigen .js-Datei',
+    icon: 'terminal',                          // 'music', 'file-text', 'terminal', 'gamepad-2', 'sparkles', 'wrench', 'bot'
+    keepAlive: false                           // true = läuft im Hintergrund weiter (perfekt für Musik/Streams!)
+  },
+
+  // 3. EIGENES CSS-DESIGN (optional)
+  styles: \`
+    .mein-addon-card {
+      padding: 18px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-left: 3px solid var(--primary);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+  \`,
+
+  // 4. EIGENE HTML-OBERFLÄCHE (für type: 'tool' oder 'hybrid')
+  html: \`
+    <div class="mein-addon-card">
+      <h2>Willkommen in meinem eigenen Addon!</h2>
+      <p class="muted">Dieser Bereich kommt komplett aus einer einzigen Datei (meinaddon.js).</p>
+      <textarea id="my-note" class="input" rows="6" placeholder="Schreibe hier etwas hinein ..."></textarea>
+      <div>
+        <button type="button" class="btn btn--primary" id="my-save-btn">Speichern</button>
+      </div>
+    </div>
+  \`,
+
+  // 5. JAVASCRIPT-LOGIK (wird beim Öffnen des Addons ausgeführt)
+  async mount(addonRoot, addonApi) {
+    const input = addonRoot.querySelector('#my-note');
+    const saveBtn = addonRoot.querySelector('#my-save-btn');
+
+    // Gespeicherte Daten beim Start laden
+    const saved = await addonApi.getStorage();
+    if (input && saved.text) {
+      input.value = saved.text;
+    }
+
+    // Beim Klick dauerhaft speichern & Toast-Meldung anzeigen
+    saveBtn?.addEventListener('click', async () => {
+      await addonApi.setStorage({ text: input ? input.value : '' });
+      addonApi.toast('Erfolgreich gespeichert!', 'success');
+    });
   }
 };
+\`\`\`
 
-const DEFAULT_NOTES_CSS = `/* Zusatz-Styles des Notizen-Addons (sqlhub-notes) */
-.notes-pin-badge {
-  color: var(--primary);
-}
-`;
+---
 
-const DEFAULT_THEME_MANIFEST = {
+## 3. Die \`addonApi\`-Schnittstelle (Alle Befehle in \`mount(addonRoot, addonApi)\`)
+
+In der Funktion \`async mount(addonRoot, addonApi)\` stehen dir folgende Helfer zur Verfügung:
+
+| Methode / Eigenschaft | Beschreibung |
+| :--- | :--- |
+| \`addonRoot\` | Das DOM-Element deines Addon-Fensters (\`addonRoot.querySelector('#...')\`). |
+| \`await addonApi.getStorage()\` | Lädt das dauerhaft gespeicherte JSON-Objekt deines Addons. |
+| \`await addonApi.setStorage(obj)\` | Speichert beliebige Daten (Notizen, Playlists, Einstellungen) dauerhaft auf der Festplatte. |
+| \`await addonApi.pickMediaFiles()\` | Öffnet den Dateidialog für lokale Audio-/Videodateien (\`.mp3\`, \`.wav\`, \`.flac\`, \`.ogg\`, \`.mp4\`) und liefert \`[{ name, path, fileUrl, size }]\`. |
+| \`await addonApi.pickMediaFolder()\` | Öffnet einen Ordnerdialog und liest alle enthaltenen Musik-/Videodateien auf einmal ein. |
+| \`addonApi.setMiniPlayer({ active, title, subtitle, playing, onToggle, onNext })\` | Blendet unten rechts den schwebenden **Mini-Player** ein, wenn der Nutzer auf eine andere Seite wechselt. |
+| \`await addonApi.copyClipboard(text)\` | Kopiert Text (z. B. ein SQL-Snippet) in die Zwischenablage. |
+| \`await addonApi.getProfiles()\` | Gibt die Liste aller gespeicherten Datenbank-Instanzen zurück. |
+| \`addonApi.navigate(viewName)\` | Wechselt zu einer anderen Ansicht (\`'dashboard'\`, \`'profiles'\`, \`'sftp'\`, \`'addons'\`). |
+| \`addonApi.toast(msg, type, title)\` | Zeigt eine Benachrichtigung an (\`type\`: \`'info'\`, \`'success'\`, \`'warning'\`, \`'error'\`). |
+
+---
+
+## 4. Beispiel 2: Reines Design- / Theme-Addon in einer Datei (\`mein-theme.js\`)
+
+Wenn du nur die Farben, Hintergründe oder Buttons von SQL Hub verändern möchtest, reicht schon eine kurze \`.js\`-Datei:
+
+\`\`\`javascript
+// mein-theme.js – Smaragdgrünes Cyber-Theme in einer einzigen Datei
+export default {
   id: 'emerald-matrix-theme',
   name: 'Emerald Pixel Theme',
   version: '1.1.0',
   author: 'SQL Hub Studio',
-  description: 'Verwandelt die Oberfläche von SQL Hub in ein smaragdgrünes Matrix-/Cyber-Launcher-Design mit passenden Akzenten, Buttons und Hero-Banner.',
+  description: 'Verwandelt SQL Hub in ein smaragdgrünes Matrix-/Cyber-Launcher-Design.',
   type: 'theme',
-  enabledByDefault: false,
-  styleFile: 'styles.css',
-  permissions: ['theme-css']
+  styles: \`
+    :root {
+      --primary: #10b981 !important;
+      --primary-hover: #059669 !important;
+      --primary-soft: rgba(16, 185, 129, 0.16) !important;
+      --accent: #06b6d4 !important;
+    }
+  \`
 };
+\`\`\`
 
-const DEFAULT_THEME_CSS = `/* Emerald Pixel Theme – wird aktiv, sobald das Addon eingeschaltet wird */
-:root {
-  --primary: #10b981 !important;
-  --primary-hover: #059669 !important;
-  --primary-soft: rgba(16, 185, 129, 0.16) !important;
-  --accent: #06b6d4 !important;
-}
+---
 
-.launcher-hero {
-  background:
-    radial-gradient(circle at 50% 25%, rgba(16, 185, 129, 0.28) 0%, rgba(6, 78, 59, 0.22) 48%, rgba(11, 13, 18, 0.96) 100%),
-    linear-gradient(180deg, #0b2922 0%, #091318 68%, #0b0d12 100%) !important;
-}
+## 5. Beispiel 3: Musik-, Radio- & YouTube-Player Addon (\`musik-player-addon.js\`)
+
+Im Ordner \`SQLHubAddons\` liegt die Datei **\`musik-player-addon.js\`** als vollständiges Referenz-Beispiel in einer einzigen Datei:
+- **Spotify-Stil Audio-Deck** mit Live-Internet-Radio, Offline-WebAudio-Synthesizer und lokalem MP3/WAV/FLAC-Import
+- **YouTube & Spotify Player** (inkl. Umschalter zwischen *Kompakt-Embed*, *YouTube Voll-Player für VEVO/Radio-Mixe* und *YouTube Music*)
+- **Hintergrund-Wiedergabe (\`keepAlive: true\`)** + schwebender Mini-Player beim Wechseln auf andere SQL Hub Seiten.
 `;
 
-/* --------------------- Referenz Musik- & Stream-Player Addon (MusikAddon) --------------------- */
+/* ============================================================================
+ * FERTIGE SINGLE-FILE (.js) BEISPIEL-ADDONS
+ * ========================================================================== */
 
-const MUSIC_ADDON_MANIFEST = {
+const EMERALD_THEME_SINGLE_JS = `// emerald-pixel-theme.js – Komplettes Design-Theme in einer einzigen .js-Datei!
+// In SQL Hub unter „Addons" -> „+ Addon hinzufügen (.js wählen)" auswählen und per Schalter aktivieren.
+
+export default {
+  id: 'emerald-matrix-theme',
+  name: 'Emerald Pixel Theme',
+  version: '1.2.0',
+  author: 'SQL Hub Studio',
+  description: 'Verwandelt die Oberfläche von SQL Hub in ein smaragdgrünes Matrix-/Cyber-Launcher-Design mit passenden Akzenten, Buttons und Hero-Banner (Single-File .js Addon).',
+  type: 'theme',
+  permissions: ['theme-css'],
+  styles: \`
+    :root {
+      --primary: #10b981 !important;
+      --primary-hover: #059669 !important;
+      --primary-soft: rgba(16, 185, 129, 0.16) !important;
+      --accent: #06b6d4 !important;
+    }
+
+    .launcher-hero {
+      background:
+        radial-gradient(circle at 50% 25%, rgba(16, 185, 129, 0.28) 0%, rgba(6, 78, 59, 0.22) 48%, rgba(11, 13, 18, 0.96) 100%),
+        linear-gradient(180deg, #0b2922 0%, #091318 68%, #0b0d12 100%) !important;
+    }
+  \`
+};
+`;
+
+const NOTES_SINGLE_JS = `// notizen-snippets-addon.js – Notizen & SQL-Snippets Werkzeug in einer einzigen .js-Datei!
+// In SQL Hub unter „Addons" -> „+ Addon hinzufügen (.js wählen)" auswählen und per Schalter aktivieren.
+
+export default {
+  id: 'sqlhub-notes',
+  name: 'Notizen & SQL-Snippets',
+  version: '1.4.0',
+  author: 'SQL Hub Team',
+  description: 'Fügt unter SFTP einen eigenen Bereich „Notizen" hinzu, in dem du Server-Notizen, Zugangs-Hinweise, To-Dos und häufig genutzte SQL-Abfragen speichern, durchsuchen und mit einem Klick kopieren kannst.',
+  type: 'tool',
+  permissions: ['sidebar', 'storage', 'clipboard'],
+  sidebar: {
+    label: 'Notizen',
+    title: 'Notizen & SQL-Snippets',
+    subtitle: 'Persönliches Scratchpad für Datenbank-Abfragen, Server-Doku & Aufgaben (Single-File .js Addon)',
+    icon: 'file-text',
+    template: 'notes'
+  },
+  styles: \`
+    .notes-pin-badge {
+      color: var(--primary);
+    }
+  \`
+};
+`;
+
+const STARTER_EXAMPLE_SINGLE_JS = `// beispiel-eigenes-addon.js – Vorlage für dein eigenes 1-Datei-Addon in VS Code!
+// Bearbeite diese Datei nach Belieben und wähle sie in SQL Hub unter „Addons" -> „+ Addon hinzufügen (.js wählen)" aus.
+
+export default {
+  id: 'mein-starter-addon',
+  name: 'Server Quick-Check & Ping Tool',
+  version: '1.0.0',
+  author: 'Dein Name',
+  description: 'Beispiel-Addon in einer einzigen .js-Datei: Zeigt deine gespeicherten Datenbank-Instanzen und ein schnelles Server-Scratchpad direkt unter SFTP an.',
+  type: 'tool',
+  permissions: ['sidebar', 'storage', 'clipboard'],
+
+  sidebar: {
+    label: 'QuickTool',
+    title: 'Server Quick-Check & Scratchpad',
+    subtitle: 'Beispiel-Addon aus einer einzigen Datei (beispiel-eigenes-addon.js)',
+    icon: 'terminal',
+    keepAlive: false
+  },
+
+  styles: \`
+    .quicktool-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 14px;
+    }
+    @media (max-width: 900px) {
+      .quicktool-grid { grid-template-columns: 1fr; }
+    }
+    .quicktool-box {
+      padding: 16px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-top: 2px solid var(--primary);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+    .quicktool-inst-item {
+      padding: 8px 10px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-family: var(--font-mono);
+      font-size: 12px;
+    }
+  \`,
+
+  html: \`
+    <div class="page-head">
+      <div class="page-head__titles">
+        <div class="page-eyebrow">SINGLE-FILE .JS ADDON VORLAGE</div>
+        <h1 class="page-title">Server Quick-Check &amp; Scratchpad</h1>
+        <p class="page-sub">Komplett geladen aus einer einzigen Datei: <code>beispiel-eigenes-addon.js</code></p>
+      </div>
+    </div>
+
+    <div class="quicktool-grid">
+      <div class="quicktool-box">
+        <h3 style="margin:0;">Gespeicherte Datenbank-Instanzen</h3>
+        <p class="muted" style="margin:0;font-size:12px;">Direkt über <code>addonApi.getProfiles()</code> geladen:</p>
+        <div id="qt-profiles-list" style="display:flex;flex-direction:column;gap:6px;"></div>
+      </div>
+
+      <div class="quicktool-box">
+        <h3 style="margin:0;">Schnelle Server-Notiz (Persistent)</h3>
+        <textarea id="qt-memo" class="input" rows="6" placeholder="Schreibe hier deine Befehle oder Notizen hinein ..."></textarea>
+        <div style="display:flex;gap:8px;">
+          <button type="button" class="btn btn--primary" id="qt-save">Notiz speichern</button>
+          <button type="button" class="btn btn--ghost" id="qt-copy">In Zwischenablage kopieren</button>
+        </div>
+      </div>
+    </div>
+  \`,
+
+  async mount(addonRoot, addonApi) {
+    const listEl = addonRoot.querySelector('#qt-profiles-list');
+    const memoEl = addonRoot.querySelector('#qt-memo');
+
+    // 1. Gespeicherte Notiz laden
+    const stored = await addonApi.getStorage();
+    if (memoEl && stored.memo) {
+      memoEl.value = stored.memo;
+    }
+
+    // 2. Datenbank-Profile laden
+    const profiles = await addonApi.getProfiles();
+    if (listEl) {
+      if (!profiles.length) {
+        listEl.innerHTML = '<div class="muted">Noch keine Datenbank-Instanzen angelegt.</div>';
+      } else {
+        listEl.innerHTML = profiles.map((p) => \`
+          <div class="quicktool-inst-item">
+            <strong>\${p.name}</strong>
+            <span class="muted">\${p.url}</span>
+          </div>
+        \`).join('');
+      }
+    }
+
+    // 3. Events
+    addonRoot.querySelector('#qt-save')?.addEventListener('click', async () => {
+      await addonApi.setStorage({ memo: memoEl ? memoEl.value : '' });
+      addonApi.toast('Notiz im Addon-Speicher gesichert!', 'success');
+    });
+
+    addonRoot.querySelector('#qt-copy')?.addEventListener('click', async () => {
+      await addonApi.copyClipboard(memoEl ? memoEl.value : '');
+      addonApi.toast('In die Zwischenablage kopiert!', 'info');
+    });
+  }
+};
+`;
+
+const MUSIC_ADDON_SINGLE_JS = `// musik-player-addon.js – Kompletter SQL Hub Musik-, Radio-, Spotify- & YouTube-Player in EINER EINZIGEN .js-Datei!
+// Einfach in SQL Hub unter „Addons" -> „+ Addon hinzufügen (.js wählen)" auswählen und per Schalter aktivieren.
+
+export default {
   id: 'sqlhub-music-player',
   name: 'SQL Hub Musik & Stream Player',
-  version: '1.5.0',
+  version: '1.6.0',
   author: 'SQL Hub Studio',
-  description: 'Vollwertiger Musik-, Radio-, Spotify- & YouTube-Player direkt unter SFTP. Unterstützt lokale MP3/WAV/FLAC/MP4-Dateien, Live-Coding-Radio, 28-Band Audio-Visualizer, YouTube-/Spotify-Embeds und Hintergrund-Wiedergabe mit Mini-Player.',
+  description: 'Vollwertiger Musik-, Radio-, Spotify- & YouTube-Player in einer einzigen .js-Datei! Unterstützt lokale MP3/WAV/FLAC/MP4-Dateien, Live-Coding-Radio, 28-Band Audio-Visualizer, YouTube Voll-Player & Hintergrund-Wiedergabe.',
   type: 'tool',
-  enabledByDefault: false,
-  styleFile: 'styles.css',
   permissions: [
     'sidebar',
     'audio-video',
@@ -325,1106 +406,854 @@ const MUSIC_ADDON_MANIFEST = {
   sidebar: {
     label: 'Musik',
     title: 'Musik & Stream Player',
-    subtitle: 'Spotify-Deck, Live-Radio, lokale MP3s & YouTube/Video-Streaming im Hintergrund',
+    subtitle: 'Spotify-Deck, Live-Radio, lokale MP3s & YouTube/Video-Streaming im Hintergrund (1-Datei .js Addon)',
     icon: 'music',
     template: 'custom',
-    keepAlive: true,
-    viewFile: 'view.html',
-    scriptFile: 'script.js'
-  }
-};
+    keepAlive: true
+  },
 
-const MUSIC_ADDON_CSS = `/* Styles für SQL Hub Musik & Stream Player (MusikAddon) */
-.music-studio {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
+  styles: \`
+    .music-studio {
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+    }
+    .music-mode-tabs {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      padding: 4px;
+      border-radius: 2px;
+    }
+    .music-mode-tab {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+      font-size: 11.5px;
+      font-weight: 700;
+      padding: 6px 12px;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      border-radius: 1px;
+    }
+    .music-mode-tab.is-active {
+      background: var(--primary);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+    .music-deck-grid {
+      display: grid;
+      grid-template-columns: 370px minmax(0, 1fr);
+      gap: 14px;
+      align-items: stretch;
+    }
+    @media (max-width: 980px) {
+      .music-deck-grid { grid-template-columns: 1fr; }
+    }
+    .music-now-card,
+    .music-playlist-card,
+    .music-yt-stage {
+      background: var(--surface);
+      border: 1px solid var(--border-strong);
+      border-radius: 2px;
+      padding: 16px;
+      box-shadow: var(--specular);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .music-cover-box {
+      position: relative;
+      height: 175px;
+      background:
+        radial-gradient(circle at 50% 35%, rgba(229, 57, 53, 0.35), rgba(15, 19, 28, 0.96) 72%),
+        #0a0d13;
+      border: 1px solid var(--border-strong);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: space-between;
+      padding: 12px;
+      overflow: hidden;
+    }
+    .music-live-pill {
+      align-self: flex-start;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      padding: 2px 8px;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-strong);
+      color: var(--success);
+    }
+    .music-visualizer-canvas {
+      width: 100%;
+      height: 68px;
+      display: block;
+    }
+    .music-track-info { text-align: center; }
+    .music-track-title {
+      font-size: 15px;
+      font-weight: 800;
+      color: var(--text);
+      margin: 0 0 3px;
+    }
+    .music-track-artist {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+      margin: 0;
+    }
+    .music-progress-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .music-time-row {
+      display: flex;
+      justify-content: space-between;
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+    .music-controls-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+    }
+    .music-play-circle {
+      width: 44px;
+      height: 44px;
+      background: var(--primary);
+      border: 1px solid rgba(255, 255, 255, 0.25);
+      color: #ffffff;
+      font-weight: 800;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 15px;
+    }
+    .music-volume-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding-top: 8px;
+      border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+    .music-volume-row input[type="range"] {
+      flex: 1;
+      accent-color: var(--primary);
+    }
+    .music-playlist-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-wrap: wrap;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+    }
+    .music-add-url-bar {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .music-track-list {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      max-height: 290px;
+      overflow-y: auto;
+    }
+    .music-track-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 8px 10px;
+      background: var(--bg-input);
+      border: 1px solid var(--border);
+      cursor: pointer;
+    }
+    .music-track-row.is-playing {
+      border-color: var(--primary);
+      background: var(--surface-2);
+      box-shadow: inset 3px 0 0 var(--primary);
+    }
+    .music-track-row__meta {
+      display: flex;
+      flex-direction: column;
+      min-width: 0;
+      flex: 1;
+    }
+    .music-track-row__name {
+      font-size: 12.5px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .music-track-row__sub {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-dim);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .music-yt-presets {
+      display: flex;
+      gap: 6px;
+      flex-wrap: wrap;
+    }
+    .music-yt-frame-wrap {
+      width: 100%;
+      height: 430px;
+      background: #06080c;
+      border: 1px solid var(--border-strong);
+      position: relative;
+    }
+    .music-yt-frame-wrap iframe {
+      width: 100%;
+      height: 100%;
+      border: none;
+      display: block;
+    }
+  \`,
 
-.music-mode-tabs {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  padding: 4px;
-  border-radius: 2px;
-}
-
-.music-mode-tab {
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-muted);
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  font-weight: 700;
-  padding: 6px 13px;
-  border-radius: 2px;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  transition: all 0.14s;
-}
-.music-mode-tab:hover {
-  color: var(--text);
-  background: var(--surface-2);
-}
-.music-mode-tab.is-active {
-  background: var(--primary);
-  color: #ffffff;
-  border-color: rgba(255, 255, 255, 0.22);
-}
-
-.music-deck-grid {
-  display: grid;
-  grid-template-columns: 360px minmax(0, 1fr);
-  gap: 14px;
-  align-items: stretch;
-}
-@media (max-width: 980px) {
-  .music-deck-grid {
-    grid-template-columns: 1fr;
-  }
-}
-
-.music-now-card {
-  background:
-    radial-gradient(circle at 50% 0%, rgba(229, 57, 53, 0.18), transparent 65%),
-    var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  padding: 16px;
-  display: flex;
-  flex-direction: column;
-  justify-content: space-between;
-  gap: 14px;
-  box-shadow: var(--specular);
-}
-
-.music-cover-stage {
-  position: relative;
-  height: 175px;
-  background: linear-gradient(145deg, #121622 0%, #0b0d12 100%);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  padding: 12px;
-}
-
-.music-cover-badge {
-  position: absolute;
-  top: 9px;
-  left: 10px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 800;
-  letter-spacing: 1px;
-  text-transform: uppercase;
-  padding: 2px 7px;
-  border-radius: 2px;
-  background: rgba(11, 13, 18, 0.85);
-  border: 1px solid var(--border-strong);
-  color: var(--primary);
-}
-
-.music-cover-status {
-  position: absolute;
-  top: 9px;
-  right: 10px;
-  font-family: var(--font-mono);
-  font-size: 9.5px;
-  font-weight: 700;
-  padding: 2px 7px;
-  border-radius: 2px;
-  background: rgba(16, 185, 129, 0.14);
-  border: 1px solid rgba(16, 185, 129, 0.45);
-  color: #34d399;
-}
-
-.music-visualizer-canvas {
-  width: 100%;
-  height: 110px;
-  display: block;
-}
-
-.music-track-info {
-  text-align: center;
-}
-.music-track-title {
-  font-size: 15.5px;
-  font-weight: 800;
-  color: var(--text);
-  margin: 0 0 3px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.music-track-artist {
-  font-family: var(--font-mono);
-  font-size: 11.5px;
-  color: var(--text-muted);
-  margin: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.music-progress-wrap {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-}
-.music-Seek {
-  width: 100%;
-  accent-color: var(--primary);
-  cursor: pointer;
-}
-.music-time-row {
-  display: flex;
-  justify-content: space-between;
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-dim);
-}
-
-.music-controls-row {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
-}
-
-.music-play-circle {
-  width: 46px;
-  height: 46px;
-  border-radius: 2px;
-  background: linear-gradient(180deg, #2d3444 0%, #1f2430 100%);
-  border: 1px solid #52607a;
-  color: #ffffff;
-  font-size: 16px;
-  font-weight: 800;
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.16), 0 4px 10px rgba(0, 0, 0, 0.45);
-  transition: all 0.14s;
-}
-.music-play-circle:hover {
-  background: var(--primary);
-  border-color: rgba(255, 255, 255, 0.35);
-}
-
-.music-ctrl-btn.is-on {
-  border-color: var(--primary) !important;
-  color: var(--primary) !important;
-  background: var(--primary-soft) !important;
-}
-
-.music-volume-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  color: var(--text-muted);
-}
-.music-volume-row input[type="range"] {
-  flex: 1;
-  accent-color: var(--primary);
-  cursor: pointer;
-}
-
-.music-playlist-card {
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  display: flex;
-  flex-direction: column;
-  min-height: 450px;
-  max-height: 560px;
-  box-shadow: var(--specular);
-  overflow: hidden;
-}
-
-.music-playlist-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 11px 14px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
-}
-
-.music-add-url-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-app);
-  flex-wrap: wrap;
-}
-
-.music-track-list {
-  flex: 1;
-  overflow-y: auto;
-  padding: 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.music-track-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 11px;
-  background: var(--bg-input);
-  border: 1px solid var(--border);
-  border-radius: 2px;
-  cursor: pointer;
-  transition: all 0.12s;
-}
-.music-track-item:hover {
-  background: var(--surface-2);
-  border-color: var(--border-strong);
-}
-.music-track-item.is-active {
-  border-color: var(--primary);
-  background: var(--surface-2);
-  box-shadow: inset 3px 0 0 var(--primary);
-}
-
-.music-track-item__left {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
-}
-.music-track-item__num {
-  width: 24px;
-  height: 24px;
-  border-radius: 2px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  font-weight: 700;
-  color: var(--text-muted);
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex-shrink: 0;
-}
-.music-track-item.is-active .music-track-item__num {
-  background: var(--primary);
-  border-color: var(--primary);
-  color: #ffffff;
-}
-
-.music-track-item__meta {
-  min-width: 0;
-  flex: 1;
-}
-.music-track-item__title {
-  font-size: 12.5px;
-  font-weight: 700;
-  color: var(--text);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-.music-track-item__sub {
-  font-family: var(--font-mono);
-  font-size: 10.5px;
-  color: var(--text-dim);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.music-yt-stage {
-  background: var(--surface);
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  padding: 14px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  box-shadow: var(--specular);
-}
-
-.music-yt-presets {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.music-yt-frame-wrap {
-  width: 100%;
-  height: 410px;
-  background: #07090d;
-  border: 1px solid var(--border-strong);
-  border-radius: 2px;
-  overflow: hidden;
-  position: relative;
-}
-.music-yt-frame-wrap iframe,
-.music-yt-frame-wrap video {
-  width: 100%;
-  height: 100%;
-  border: none;
-  display: block;
-}
-`;
-
-const MUSIC_ADDON_HTML = `
-<div class="music-studio">
-  <div class="page-head">
-    <div class="page-head__titles">
-      <div class="page-eyebrow">ADDON · MULTIMEDIA &amp; CODING BEATS</div>
-      <h1 class="page-title">SQL Hub Musik &amp; Stream Player</h1>
-      <p class="page-sub">Höre lokale MP3s/FLACs, Live-Coding-Radio, Synthwave oder YouTube-/Spotify-Streams im Hintergrund beim Verwalten deiner Datenbanken</p>
-    </div>
-    <div class="page-head__actions">
-      <div class="music-mode-tabs" role="tablist">
-        <button type="button" class="music-mode-tab is-active" data-music-tab="deck">
-          <span>♫ Audio-Deck &amp; Lokale MP3s</span>
-        </button>
-        <button type="button" class="music-mode-tab" data-music-tab="embed">
-          <span>▶ YouTube / Spotify / Video</span>
-        </button>
-      </div>
-      <button type="button" class="btn btn--primary" id="music-pick-files">
-        <span>+ Lokale Musikdateien</span>
-      </button>
-      <button type="button" class="btn btn--subtle" id="music-pick-folder">
-        <span>+ Musik-Ordner</span>
-      </button>
-    </div>
-  </div>
-
-  <!-- TAB 1: AUDIO-DECK, RADIO, SYNTH-BEATS & LOKALE MP3s -->
-  <div id="music-pane-deck" class="music-deck-grid">
-    <div class="music-now-card">
-      <div class="music-cover-stage">
-        <span class="music-cover-badge" id="music-source-badge">CODING RADIO</span>
-        <span class="music-cover-status" id="music-live-status">Bereit</span>
-        <canvas class="music-visualizer-canvas" id="music-visualizer" width="320" height="110"></canvas>
-      </div>
-
-      <div class="music-track-info">
-        <h3 class="music-track-title" id="music-now-title">Midnight SQL Lofi Synth</h3>
-        <p class="music-track-artist" id="music-now-artist">SQL Hub Studio · Synth &amp; Stream Engine</p>
-      </div>
-
-      <div class="music-progress-wrap">
-        <input type="range" class="music-Seek" id="music-seek" min="0" max="100" value="0" step="0.1" />
-        <div class="music-time-row">
-          <span id="music-time-cur">00:00</span>
-          <span id="music-time-dur">LIVE / ENDLOS</span>
+  html: \`
+    <div class="music-studio">
+      <div class="page-head" style="margin-bottom:4px;">
+        <div class="page-head__titles">
+          <div class="page-eyebrow">SINGLE-FILE .JS ADDON · MULTIMEDIA &amp; CODING BEATS</div>
+          <h1 class="page-title">SQL Hub Musik &amp; Stream Player</h1>
+          <p class="page-sub">Höre lokale MP3s/FLACs, Live-Coding-Radio, Synthwave oder YouTube-/Spotify-Streams im Hintergrund</p>
+        </div>
+        <div class="page-head__actions" style="display:flex;gap:8px;flex-wrap:wrap;">
+          <div class="music-mode-tabs">
+            <button type="button" class="music-mode-tab is-active" data-music-tab="deck">♫ Audio-Deck &amp; Lokale MP3s</button>
+            <button type="button" class="music-mode-tab" data-music-tab="embed">▶ YouTube / Spotify / Video</button>
+          </div>
+          <button type="button" class="btn btn--primary" id="music-pick-files">+ Lokale Musikdateien</button>
+          <button type="button" class="btn btn--ghost" id="music-pick-folder">+ Musik-Ordner</button>
         </div>
       </div>
 
-      <div class="music-controls-row">
-        <button type="button" class="btn btn--sm btn--ghost music-ctrl-btn" id="music-btn-shuffle" title="Zufallswiedergabe">Shuffle</button>
-        <button type="button" class="btn btn--sm btn--ghost" id="music-btn-prev" title="Vorheriger Titel">⏮</button>
-        <button type="button" class="music-play-circle" id="music-btn-play" title="Abspielen / Pause">▶</button>
-        <button type="button" class="btn btn--sm btn--ghost" id="music-btn-next" title="Nächster Titel">⏭</button>
-        <button type="button" class="btn btn--sm btn--ghost music-ctrl-btn" id="music-btn-repeat" title="Wiederholen">Repeat</button>
-      </div>
+      <!-- TAB 1: AUDIO DECK -->
+      <div id="music-pane-deck" class="music-deck-grid">
+        <div class="music-now-card">
+          <div class="music-cover-box">
+            <span class="music-live-pill" id="music-status-badge">● BEREIT</span>
+            <canvas class="music-visualizer-canvas" id="music-visualizer" width="320" height="68"></canvas>
+          </div>
 
-      <div class="music-volume-row">
-        <span>LAUTSTÄRKE</span>
-        <input type="range" id="music-volume" min="0" max="100" value="75" />
-        <span id="music-volume-label">75%</span>
-      </div>
+          <div class="music-track-info">
+            <h3 class="music-track-title" id="music-now-title">Midnight SQL Lofi Synth</h3>
+            <p class="music-track-artist" id="music-now-artist">SQL Hub Studio · Synth &amp; Stream Engine</p>
+          </div>
 
-      <audio id="music-audio-el" crossorigin="anonymous" preload="none" hidden></audio>
-    </div>
+          <div class="music-progress-wrap">
+            <input type="range" id="music-seek" min="0" max="100" value="0" step="0.1" />
+            <div class="music-time-row">
+              <span id="music-time-cur">00:00</span>
+              <span id="music-time-dur">LIVE / ENDLOS</span>
+            </div>
+          </div>
 
-    <div class="music-playlist-card">
-      <div class="music-playlist-head">
-        <div>
-          <strong style="font-size:13px;">PLAYLIST, RADIO-STREAMS &amp; LOKALE TRACKS</strong>
-          <div style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono);" id="music-playlist-count">0 Titel in deiner Bibliothek</div>
+          <div class="music-controls-row">
+            <button type="button" class="btn btn--sm btn--ghost" id="music-btn-shuffle">Shuffle</button>
+            <button type="button" class="btn btn--sm btn--ghost" id="music-btn-prev">⏮</button>
+            <button type="button" class="music-play-circle" id="music-btn-play">▶</button>
+            <button type="button" class="btn btn--sm btn--ghost" id="music-btn-next">⏭</button>
+            <button type="button" class="btn btn--sm btn--ghost" id="music-btn-repeat">Repeat</button>
+          </div>
+
+          <div class="music-volume-row">
+            <span>LAUTSTÄRKE</span>
+            <input type="range" id="music-volume" min="0" max="100" value="75" />
+            <span id="music-volume-label">75%</span>
+          </div>
+
+          <audio id="music-audio-el" crossorigin="anonymous" preload="none" hidden></audio>
         </div>
-        <div style="display:flex;gap:6px;">
-          <button type="button" class="btn btn--xs btn--ghost" id="music-restore-defaults">Standard-Streams laden</button>
+
+        <div class="music-playlist-card">
+          <div class="music-playlist-head">
+            <div>
+              <strong style="font-size:13px;">PLAYLIST, RADIO-STREAMS &amp; LOKALE TRACKS</strong>
+              <div style="font-size:11px;color:var(--text-dim);font-family:var(--font-mono);" id="music-playlist-count">0 Titel</div>
+            </div>
+            <button type="button" class="btn btn--xs btn--ghost" id="music-restore-defaults">Standard-Streams laden</button>
+          </div>
+
+          <form class="music-add-url-bar" id="music-add-stream-form">
+            <input type="text" class="input" id="music-stream-title" placeholder="Titel (z. B. Mein Lofi Radio)" style="width:175px;" />
+            <input type="text" class="input" id="music-stream-url" placeholder="Direkte MP3- / Stream- / Datei-URL (https://... oder file://...)" style="flex:1;min-width:180px;" />
+            <button type="submit" class="btn btn--sm btn--primary">+ Hinzufügen</button>
+          </form>
+
+          <div class="music-track-list" id="music-track-list"></div>
         </div>
       </div>
 
-      <form class="music-add-url-bar" id="music-add-stream-form">
-        <input type="text" class="input" id="music-stream-title" placeholder="Titel (z. B. Mein Lofi Radio)" style="width:175px;" />
-        <input type="text" class="input" id="music-stream-url" placeholder="Direkte MP3- / Stream- / Datei-URL (https://... oder file://...)" style="flex:1;min-width:180px;" />
-        <button type="submit" class="btn btn--sm btn--primary">+ Hinzufügen</button>
-      </form>
+      <!-- TAB 2: YOUTUBE / SPOTIFY / VIDEO STREAM -->
+      <div id="music-pane-embed" class="music-yt-stage" hidden>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
+          <div>
+            <strong style="font-size:13.5px;">YOUTUBE, SPOTIFY &amp; DIREKT-VIDEO PLAYER</strong>
+            <div style="font-size:11.5px;color:var(--text-muted);">Füge einen YouTube-Link (auch Radio-Mixe &amp; VEVO), eine Video-ID oder einen Spotify-Link ein</div>
+          </div>
+          <div class="music-yt-presets">
+            <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://www.youtube.com/watch?v=jfKfPfyJRdk">Lofi Girl 24/7</button>
+            <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://www.youtube.com/watch?v=4xDzrJKXOOY">Synthwave Radio</button>
+            <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://www.youtube.com/watch?v=5yx6BWlEVcY">Chillhop Beats</button>
+            <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://open.spotify.com/embed/playlist/37i9dQZF1DWWQRwui0ExPn?utm_source=generator&theme=0">Spotify Lofi</button>
+          </div>
+        </div>
 
-      <div class="music-track-list" id="music-track-list"></div>
-    </div>
-  </div>
+        <form id="music-yt-form" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+          <input type="text" class="input" id="music-yt-input" style="flex:1;min-width:240px;" placeholder="https://www.youtube.com/watch?v=... oder https://open.spotify.com/playlist/..." />
+          <select class="input" id="music-yt-mode" style="width:225px;font-family:var(--font-mono);font-size:11.5px;">
+            <option value="watch">YouTube Voll-Player (Alle Songs &amp; Mixe)</option>
+            <option value="embed">Kompakt Embed-Player</option>
+            <option value="ytmusic">YouTube Music Player</option>
+          </select>
+          <button type="submit" class="btn btn--primary">Stream im Player starten</button>
+        </form>
 
-  <!-- TAB 2: YOUTUBE / SPOTIFY / VIDEO STREAM EMBED -->
-  <div id="music-pane-embed" class="music-yt-stage" hidden>
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;">
-      <div>
-        <strong style="font-size:13.5px;">YOUTUBE, SPOTIFY &amp; DIREKT-VIDEO PLAYER</strong>
-        <div style="font-size:11.5px;color:var(--text-muted);">Füge einen YouTube-Link, eine YouTube-Video-ID, einen Spotify-Track/Playlist-Link oder eine MP4-URL ein</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);">
+          <span>Der <strong>YouTube Voll-Player</strong> spielt auch geschützte VEVO-Musikvideos und Radio-Mixe (<code>&amp;list=RD...</code>) ohne Fehler 153 direkt ab.</span>
+          <div style="display:flex;gap:6px;">
+            <button type="button" class="btn btn--xs btn--ghost" id="music-yt-switch-watch">Voll-Player (VEVO / Mix)</button>
+            <button type="button" class="btn btn--xs btn--ghost" id="music-yt-switch-embed">Kompakt-Embed</button>
+            <button type="button" class="btn btn--xs btn--ghost" id="music-yt-switch-ytmusic">YouTube Music</button>
+          </div>
+        </div>
+
+        <div class="music-yt-frame-wrap" id="music-yt-container">
+          <iframe
+            id="music-yt-iframe"
+            src="about:blank"
+            data-default-src="https://www.youtube.com/embed/jfKfPfyJRdk?autoplay=1&rel=0&playsinline=1"
+            referrerpolicy="strict-origin-when-cross-origin"
+            title="SQL Hub Stream Player"
+            allowfullscreen>
+          </iframe>
+        </div>
       </div>
-      <div class="music-yt-presets">
-        <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://www.youtube.com/embed/jfKfPfyJRdk?autoplay=1">Lofi Girl 24/7</button>
-        <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://www.youtube.com/embed/4xDzrJKXOOY?autoplay=1">Synthwave Radio</button>
-        <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://www.youtube.com/embed/5yx6BWlEVcY?autoplay=1">Chillhop Beats</button>
-        <button type="button" class="btn btn--xs btn--subtle" data-yt-preset="https://open.spotify.com/embed/playlist/37i9dQZF1DWWQRwui0ExPn?utm_source=generator&theme=0">Spotify Lofi Playlist</button>
-      </div>
     </div>
+  \`,
 
-    <form id="music-yt-form" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-      <input type="text" class="input" id="music-yt-input" style="flex:1;min-width:240px;" placeholder="https://www.youtube.com/watch?v=... oder https://open.spotify.com/playlist/..." />
-      <select class="input" id="music-yt-mode" style="width:210px;font-family:var(--font-mono);font-size:11.5px;">
-        <option value="embed">Kompakt Embed-Player</option>
-        <option value="watch">YouTube Voll-Player (VEVO / Mix)</option>
-        <option value="ytmusic">YouTube Music Player</option>
-      </select>
-      <button type="submit" class="btn btn--primary">Stream im Player starten</button>
-    </form>
+  async mount(addonRoot, addonApi) {
+    const DEFAULT_TRACKS = [
+      {
+        id: 'synth-lofi-1',
+        title: 'Midnight SQL Lofi Synth (Offline Engine)',
+        artist: 'SQL Hub WebAudio Synth · Endlos-Beat',
+        kind: 'synth',
+        preset: 'lofi'
+      },
+      {
+        id: 'synth-cyber-2',
+        title: 'Neon Database Pulse (Cyberpunk Arpeggio)',
+        artist: 'SQL Hub WebAudio Synth · 110 BPM',
+        kind: 'synth',
+        preset: 'cyber'
+      },
+      {
+        id: 'radio-nightride',
+        title: 'Nightride FM – Chillsynth & Coding Stream',
+        artist: 'Live Internet Radio (MP3 Stream)',
+        kind: 'stream',
+        url: 'https://stream.nightride.fm/chillsynth.mp3'
+      },
+      {
+        id: 'radio-soma-groovesalad',
+        title: 'SomaFM Groove Salad – Ambient Beats',
+        artist: 'Live Internet Radio · 128k MP3',
+        kind: 'stream',
+        url: 'https://ice2.somafm.com/groovesalad-128-mp3'
+      }
+    ];
 
-    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;font-size:11px;color:var(--text-dim);">
-      <span>Tipp: Falls ein Label/VEVO-Song oder Radio-Mix (<code>&amp;list=RD...</code>) im Embed-Modus gesperrt ist, wechsle rechts auf <strong>YouTube Voll-Player</strong> oder <strong>YouTube Music</strong>.</span>
-      <div style="display:flex;gap:6px;">
-        <button type="button" class="btn btn--xs btn--ghost" id="music-yt-switch-embed">Auf Embed wechseln</button>
-        <button type="button" class="btn btn--xs btn--ghost" id="music-yt-switch-watch">Auf Voll-Player (Mix/VEVO) wechseln</button>
-      </div>
-    </div>
+    const audioEl = addonRoot.querySelector('#music-audio-el');
+    const playBtn = addonRoot.querySelector('#music-btn-play');
+    const prevBtn = addonRoot.querySelector('#music-btn-prev');
+    const nextBtn = addonRoot.querySelector('#music-btn-next');
+    const shuffleBtn = addonRoot.querySelector('#music-btn-shuffle');
+    const repeatBtn = addonRoot.querySelector('#music-btn-repeat');
+    const seekEl = addonRoot.querySelector('#music-seek');
+    const volEl = addonRoot.querySelector('#music-volume');
+    const volLabel = addonRoot.querySelector('#music-volume-label');
+    const curTimeEl = addonRoot.querySelector('#music-time-cur');
+    const durTimeEl = addonRoot.querySelector('#music-time-dur');
+    const titleEl = addonRoot.querySelector('#music-now-title');
+    const artistEl = addonRoot.querySelector('#music-now-artist');
+    const badgeEl = addonRoot.querySelector('#music-status-badge');
+    const listEl = addonRoot.querySelector('#music-track-list');
+    const countEl = addonRoot.querySelector('#music-playlist-count');
+    const canvas = addonRoot.querySelector('#music-visualizer');
+    const ctx = canvas ? canvas.getContext('2d') : null;
 
-    <div class="music-yt-frame-wrap" id="music-yt-container">
-      <iframe
-        id="music-yt-iframe"
-        src="about:blank"
-        data-default-src="https://www.youtube.com/embed/jfKfPfyJRdk?autoplay=1&rel=0&playsinline=1"
-        referrerpolicy="strict-origin-when-cross-origin"
-        title="SQL Hub Stream Player"
-        allowfullscreen>
-      </iframe>
-    </div>
-  </div>
-</div>
-`;
+    let tracks = [...DEFAULT_TRACKS];
+    let currentIndex = 0;
+    let isPlaying = false;
+    let shuffle = false;
+    let repeat = false;
+    let synthTimer = null;
+    let audioCtx = null;
 
-const MUSIC_ADDON_JS = `(async () => {
-  const DEFAULT_TRACKS = [
-    {
-      id: 'synth-lofi-1',
-      title: 'Midnight SQL Lofi Synth (Offline Engine)',
-      artist: 'SQL Hub WebAudio Synth · Endlos-Beat',
-      kind: 'synth',
-      preset: 'lofi'
-    },
-    {
-      id: 'synth-cyber-2',
-      title: 'Neon Database Pulse (Cyberpunk Arpeggio)',
-      artist: 'SQL Hub WebAudio Synth · 110 BPM',
-      kind: 'synth',
-      preset: 'cyber'
-    },
-    {
-      id: 'stream-nightride',
-      title: 'Nightride FM – Synthwave & Chillsynth Live',
-      artist: 'Live Internet Radio Stream (MP3)',
-      kind: 'audio',
-      url: 'https://stream.nightride.fm/chillsynth.mp3'
-    },
-    {
-      id: 'stream-lofi-box',
-      title: 'SomaFM Groove Salad – Ambient & Coding Beats',
-      artist: 'Live Internet Radio Stream (MP3)',
-      kind: 'audio',
-      url: 'https://ice2.somafm.com/groovesalad-128-mp3'
-    },
-    {
-      id: 'stream-defcon',
-      title: 'SomaFM DEF CON Radio – Hacker & Tech Music',
-      artist: 'Live Internet Radio Stream (MP3)',
-      kind: 'audio',
-      url: 'https://ice2.somafm.com/defcon-128-mp3'
+    try {
+      const saved = await addonApi.getStorage();
+      if (saved && Array.isArray(saved.tracks) && saved.tracks.length > 0) {
+        tracks = saved.tracks;
+      }
+      if (saved && typeof saved.volume === 'number' && volEl) {
+        volEl.value = String(saved.volume);
+        if (volLabel) volLabel.textContent = saved.volume + '%';
+        if (audioEl) audioEl.volume = saved.volume / 100;
+      } else if (audioEl) {
+        audioEl.volume = 0.75;
+      }
+    } catch { /* ignore */ }
+
+    async function persistState() {
+      try {
+        await addonApi.setStorage({
+          tracks,
+          volume: volEl ? Number(volEl.value) : 75
+        });
+      } catch { /* ignore */ }
     }
-  ];
 
-  const audioEl = addonRoot.querySelector('#music-audio-el');
-  const canvas = addonRoot.querySelector('#music-visualizer');
-  const ctx = canvas ? canvas.getContext('2d') : null;
-
-  const titleEl = addonRoot.querySelector('#music-now-title');
-  const artistEl = addonRoot.querySelector('#music-now-artist');
-  const badgeEl = addonRoot.querySelector('#music-source-badge');
-  const statusEl = addonRoot.querySelector('#music-live-status');
-  const playBtn = addonRoot.querySelector('#music-btn-play');
-  const prevBtn = addonRoot.querySelector('#music-btn-prev');
-  const nextBtn = addonRoot.querySelector('#music-btn-next');
-  const shuffleBtn = addonRoot.querySelector('#music-btn-shuffle');
-  const repeatBtn = addonRoot.querySelector('#music-btn-repeat');
-  const seekEl = addonRoot.querySelector('#music-seek');
-  const curTimeEl = addonRoot.querySelector('#music-time-cur');
-  const durTimeEl = addonRoot.querySelector('#music-time-dur');
-  const volEl = addonRoot.querySelector('#music-volume');
-  const volLabelEl = addonRoot.querySelector('#music-volume-label');
-  const trackListEl = addonRoot.querySelector('#music-track-list');
-  const countEl = addonRoot.querySelector('#music-playlist-count');
-
-  const stored = (await addonApi.getStorage()) || {};
-  let tracks = Array.isArray(stored.tracks) && stored.tracks.length > 0 ? stored.tracks : [...DEFAULT_TRACKS];
-  let currentIndex = Number(stored.currentIndex) || 0;
-  if (currentIndex >= tracks.length) currentIndex = 0;
-  let isPlaying = false;
-  let shuffle = Boolean(stored.shuffle);
-  let repeat = Boolean(stored.repeat);
-  let volume = stored.volume !== undefined ? Number(stored.volume) : 75;
-
-  if (volEl) volEl.value = String(volume);
-  if (volLabelEl) volLabelEl.textContent = volume + '%';
-  if (audioEl) audioEl.volume = Math.max(0, Math.min(1, volume / 100));
-  shuffleBtn?.classList.toggle('is-on', shuffle);
-  repeatBtn?.classList.toggle('is-on', repeat);
-
-  // WebAudio Synthesizer für garantierte Offline-Lofi/Cyber-Beats
-  let audioCtx = null;
-  let synthTimer = null;
-  let synthGain = null;
-  let stepCounter = 0;
-
-  function stopSynth() {
-    if (synthTimer) {
-      clearInterval(synthTimer);
-      synthTimer = null;
+    function stopSynth() {
+      if (synthTimer) {
+        clearInterval(synthTimer);
+        synthTimer = null;
+      }
     }
-  }
 
-  function startSynth(preset = 'lofi') {
-    stopSynth();
-    const AudioContextCls = window.AudioContext || window.webkitAudioContext;
-    if (!AudioContextCls) return;
-    if (!audioCtx) audioCtx = new AudioContextCls();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-    if (!synthGain) {
-      synthGain = audioCtx.createGain();
-      synthGain.connect(audioCtx.destination);
+    function startSynthEngine(preset) {
+      stopSynth();
+      try {
+        const AC = window.AudioContext || window.webkitAudioContext;
+        if (!audioCtx) audioCtx = new AC();
+        if (audioCtx.state === 'suspended') audioCtx.resume();
+        const scale = preset === 'cyber'
+          ? [110, 130.81, 146.83, 164.81, 196, 220, 261.63]
+          : [130.81, 164.81, 196.0, 246.94, 261.63, 329.63];
+        let step = 0;
+        synthTimer = setInterval(() => {
+          if (!isPlaying) return;
+          const now = audioCtx.currentTime;
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = preset === 'cyber' ? 'sawtooth' : 'triangle';
+          const freq = scale[step % scale.length];
+          step += shuffle ? Math.floor(Math.random() * 3) + 1 : 1;
+          osc.frequency.setValueAtTime(freq, now);
+          const vol = (volEl ? Number(volEl.value) / 100 : 0.75) * 0.14;
+          gain.gain.setValueAtTime(0.001, now);
+          gain.gain.exponentialRampToValueAtTime(Math.max(0.005, vol), now + 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.42);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(now);
+          osc.stop(now + 0.44);
+        }, preset === 'cyber' ? 260 : 420);
+      } catch { /* ignore */ }
     }
-    synthGain.gain.setValueAtTime((volume / 100) * 0.18, audioCtx.currentTime);
 
-    const chords = preset === 'cyber'
-      ? [[110, 164.81, 220, 261.63], [98, 146.83, 196, 246.94], [87.31, 130.81, 174.61, 220], [98, 146.83, 196, 293.66]]
-      : [[261.63, 329.63, 392.00, 493.88], [220.00, 261.63, 329.63, 392.00], [174.61, 220.00, 261.63, 349.23], [196.00, 246.94, 293.66, 392.00]];
-
-    const playStep = () => {
-      if (!isPlaying) return;
-      const now = audioCtx.currentTime;
-      const chord = chords[Math.floor(stepCounter / 4) % chords.length];
-      const note = chord[stepCounter % chord.length];
-
-      const osc = audioCtx.createOscillator();
-      const noteGain = audioCtx.createGain();
-      osc.type = preset === 'cyber' ? 'sawtooth' : 'triangle';
-      osc.frequency.setValueAtTime(note, now);
-
-      noteGain.gain.setValueAtTime(0.001, now);
-      noteGain.gain.exponentialRampToValueAtTime(0.28, now + 0.04);
-      noteGain.gain.exponentialRampToValueAtTime(0.0008, now + (preset === 'cyber' ? 0.32 : 0.65));
-
-      osc.connect(noteGain);
-      noteGain.connect(synthGain);
-      osc.start(now);
-      osc.stop(now + (preset === 'cyber' ? 0.35 : 0.7));
-      stepCounter++;
-    };
-
-    playStep();
-    synthTimer = setInterval(playStep, preset === 'cyber' ? 260 : 480);
-  }
-
-  function formatSec(sec) {
-    if (!Number.isFinite(sec) || sec <= 0) return '00:00';
-    const m = Math.floor(sec / 60);
-    const s = Math.floor(sec % 60);
-    return String(m).padStart(2, '0') + ':' + String(s).padStart(2, '0');
-  }
-
-  async function persistState() {
-    await addonApi.setStorage({
-      tracks,
-      currentIndex,
-      shuffle,
-      repeat,
-      volume
-    });
-  }
-
-  function syncMiniPlayer() {
-    const current = tracks[currentIndex];
-    if (!current) return;
-    if (typeof addonApi.setMiniPlayer === 'function') {
+    function syncMiniPlayer() {
+      const current = tracks[currentIndex];
+      if (!current) return;
       addonApi.setMiniPlayer({
         active: isPlaying,
         title: current.title,
-        subtitle: current.artist || 'SQL Hub Musik Player',
+        subtitle: current.artist,
         playing: isPlaying,
         onToggle: () => togglePlay(),
         onNext: () => playNext()
       });
     }
-  }
 
-  function renderPlaylist() {
-    if (!trackListEl) return;
-    if (countEl) countEl.textContent = tracks.length + ' Titel in deiner Bibliothek';
-    const current = tracks[currentIndex] || tracks[0];
-    if (current) {
-      if (titleEl) titleEl.textContent = current.title;
-      if (artistEl) artistEl.textContent = current.artist || current.url || 'Lokale Audiodatei';
-      if (badgeEl) {
-        badgeEl.textContent = current.kind === 'synth'
-          ? 'OFFLINE SYNTH'
-          : (current.kind === 'local' ? 'LOKALE DATEI' : 'LIVE STREAM');
-      }
-    }
-
-    trackListEl.innerHTML = tracks.map((t, idx) => \`
-      <div class="music-track-item \${idx === currentIndex ? 'is-active' : ''}" data-track-idx="\${idx}">
-        <div class="music-track-item__left">
-          <span class="music-track-item__num">\${idx === currentIndex && isPlaying ? '♫' : (idx + 1)}</span>
-          <div class="music-track-item__meta">
-            <div class="music-track-item__title">\${t.title}</div>
-            <div class="music-track-item__sub">\${t.artist || t.url || ''}</div>
+    function renderPlaylist() {
+      if (!listEl) return;
+      if (countEl) countEl.textContent = tracks.length + ' Titel in deiner Bibliothek';
+      listEl.innerHTML = tracks.map((t, idx) => \`
+        <div class="music-track-row \${idx === currentIndex ? 'is-playing' : ''}" data-track-idx="\${idx}">
+          <div class="music-track-row__meta">
+            <div class="music-track-row__name">\${idx === currentIndex && isPlaying ? '▶ ' : ''}\${t.title}</div>
+            <div class="music-track-row__sub">\${t.artist}</div>
           </div>
+          <button type="button" class="btn btn--xs btn--ghost" data-del-idx="\${idx}" title="Aus Playlist entfernen">✕</button>
         </div>
-        <button type="button" class="btn btn--xs btn--ghost" data-track-remove="\${idx}" title="Aus Playlist entfernen">✕</button>
-      </div>
-    \`).join('');
+      \`).join('');
 
-    trackListEl.querySelectorAll('[data-track-idx]').forEach((row) => {
-      row.addEventListener('click', (e) => {
-        if (e.target.closest('[data-track-remove]')) return;
-        const idx = Number(row.getAttribute('data-track-idx'));
-        startTrack(idx, true);
+      listEl.querySelectorAll('[data-track-idx]').forEach((row) => {
+        row.addEventListener('click', (e) => {
+          if (e.target.closest('[data-del-idx]')) return;
+          const idx = Number(row.getAttribute('data-track-idx'));
+          startTrack(idx, true);
+        });
       });
-    });
 
-    trackListEl.querySelectorAll('[data-track-remove]').forEach((btn) => {
-      btn.addEventListener('click', async (e) => {
-        e.stopPropagation();
-        const idx = Number(btn.getAttribute('data-track-remove'));
-        if (tracks.length <= 1) {
-          addonApi.toast('Mindestens ein Titel muss in der Playlist bleiben.', 'warning');
-          return;
-        }
-        tracks.splice(idx, 1);
-        if (currentIndex >= tracks.length) currentIndex = 0;
-        await persistState();
-        renderPlaylist();
+      listEl.querySelectorAll('[data-del-idx]').forEach((btn) => {
+        btn.addEventListener('click', async (e) => {
+          e.stopPropagation();
+          const idx = Number(btn.getAttribute('data-del-idx'));
+          tracks.splice(idx, 1);
+          if (currentIndex >= tracks.length) currentIndex = Math.max(0, tracks.length - 1);
+          await persistState();
+          renderPlaylist();
+        });
       });
-    });
-  }
-
-  async function startTrack(idx, autoPlay = true) {
-    if (idx < 0 || idx >= tracks.length) idx = 0;
-    currentIndex = idx;
-    const track = tracks[currentIndex];
-    stopSynth();
-    if (audioEl) {
-      audioEl.pause();
-      audioEl.removeAttribute('src');
     }
 
-    renderPlaylist();
-    await persistState();
-
-    if (!autoPlay) {
-      isPlaying = false;
-      if (playBtn) playBtn.textContent = '▶';
-      if (statusEl) statusEl.textContent = 'Pausiert';
-      syncMiniPlayer();
-      return;
-    }
-
-    isPlaying = true;
-    if (playBtn) playBtn.textContent = '⏸';
-    if (statusEl) statusEl.textContent = 'Spielt ab';
-
-    if (track.kind === 'synth') {
-      if (durTimeEl) durTimeEl.textContent = 'SYNTH LIVE';
-      startSynth(track.preset || 'lofi');
-      syncMiniPlayer();
-      renderPlaylist();
-      return;
-    }
-
-    if (audioEl && track.url) {
-      audioEl.src = track.url;
-      audioEl.volume = Math.max(0, Math.min(1, volume / 100));
-      try {
-        await audioEl.play();
-        if (statusEl) statusEl.textContent = 'Spielt ab';
-      } catch (err) {
-        // Fallback auf Offline-Synth falls kein Internet besteht
-        addonApi.toast('Stream nicht erreichbar – wechsle auf Offline-Synth-Beat.', 'warning');
-        startSynth('lofi');
-      }
-    }
-    syncMiniPlayer();
-    renderPlaylist();
-  }
-
-  function togglePlay() {
-    if (isPlaying) {
-      isPlaying = false;
+    async function startTrack(index, autoPlay = true) {
+      if (!tracks.length) return;
+      currentIndex = ((index % tracks.length) + tracks.length) % tracks.length;
+      const track = tracks[currentIndex];
+      if (titleEl) titleEl.textContent = track.title;
+      if (artistEl) artistEl.textContent = track.artist;
       stopSynth();
-      audioEl?.pause();
-      if (playBtn) playBtn.textContent = '▶';
-      if (statusEl) statusEl.textContent = 'Pausiert';
-      syncMiniPlayer();
+      if (audioEl) {
+        audioEl.pause();
+        audioEl.removeAttribute('src');
+      }
+
+      if (!autoPlay) {
+        isPlaying = false;
+        if (playBtn) playBtn.textContent = '▶';
+        if (badgeEl) badgeEl.textContent = '● BEREIT';
+        renderPlaylist();
+        syncMiniPlayer();
+        return;
+      }
+
+      isPlaying = true;
+      if (playBtn) playBtn.textContent = '⏸';
+      if (badgeEl) badgeEl.textContent = '● SPIELT AB';
+
+      if (track.kind === 'synth') {
+        if (durTimeEl) durTimeEl.textContent = 'SYNTH LIVE';
+        startSynthEngine(track.preset || 'lofi');
+      } else if (audioEl && track.url) {
+        audioEl.src = track.url;
+        try {
+          await audioEl.play();
+        } catch {
+          addonApi.toast('Stream wird geladen …', 'info');
+        }
+      }
       renderPlaylist();
-    } else {
-      startTrack(currentIndex, true);
+      syncMiniPlayer();
     }
-  }
 
-  function playNext() {
-    if (shuffle && tracks.length > 1) {
-      let next = Math.floor(Math.random() * tracks.length);
-      if (next === currentIndex) next = (next + 1) % tracks.length;
-      startTrack(next, true);
-    } else {
-      startTrack((currentIndex + 1) % tracks.length, true);
-    }
-  }
-
-  function playPrev() {
-    startTrack((currentIndex - 1 + tracks.length) % tracks.length, true);
-  }
-
-  playBtn?.addEventListener('click', togglePlay);
-  nextBtn?.addEventListener('click', playNext);
-  prevBtn?.addEventListener('click', playPrev);
-
-  shuffleBtn?.addEventListener('click', async () => {
-    shuffle = !shuffle;
-    shuffleBtn.classList.toggle('is-on', shuffle);
-    await persistState();
-  });
-
-  repeatBtn?.addEventListener('click', async () => {
-    repeat = !repeat;
-    repeatBtn.classList.toggle('is-on', repeat);
-    await persistState();
-  });
-
-  volEl?.addEventListener('input', () => {
-    volume = Number(volEl.value) || 0;
-    if (volLabelEl) volLabelEl.textContent = volume + '%';
-    if (audioEl) audioEl.volume = Math.max(0, Math.min(1, volume / 100));
-    if (synthGain && audioCtx) {
-      synthGain.gain.setValueAtTime((volume / 100) * 0.18, audioCtx.currentTime);
-    }
-    persistState();
-  });
-
-  audioEl?.addEventListener('timeupdate', () => {
-    if (!audioEl.duration || !Number.isFinite(audioEl.duration)) {
-      if (curTimeEl) curTimeEl.textContent = formatSec(audioEl.currentTime);
-      if (durTimeEl) durTimeEl.textContent = 'LIVE STREAM';
-      return;
-    }
-    const pct = (audioEl.currentTime / audioEl.duration) * 100;
-    if (seekEl) seekEl.value = String(pct);
-    if (curTimeEl) curTimeEl.textContent = formatSec(audioEl.currentTime);
-    if (durTimeEl) durTimeEl.textContent = formatSec(audioEl.duration);
-  });
-
-  audioEl?.addEventListener('ended', () => {
-    if (repeat) {
-      startTrack(currentIndex, true);
-    } else {
-      playNext();
-    }
-  });
-
-  seekEl?.addEventListener('input', () => {
-    if (audioEl && audioEl.duration && Number.isFinite(audioEl.duration)) {
-      audioEl.currentTime = (Number(seekEl.value) / 100) * audioEl.duration;
-    }
-  });
-
-  // Lokale Musikdateien & Ordner importieren
-  addonRoot.querySelector('#music-pick-files')?.addEventListener('click', async () => {
-    if (typeof addonApi.pickMediaFiles !== 'function') return;
-    const files = await addonApi.pickMediaFiles();
-    if (!files || !files.length) return;
-    for (const f of files) {
-      tracks.push({
-        id: 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-        title: f.name.replace(/\\.[^.]+$/, ''),
-        artist: f.path,
-        kind: 'local',
-        url: f.fileUrl
-      });
-    }
-    await persistState();
-    renderPlaylist();
-    startTrack(tracks.length - files.length, true);
-    addonApi.toast(files.length + ' Musikdatei(en) zur Playlist hinzugefügt!', 'success');
-  });
-
-  addonRoot.querySelector('#music-pick-folder')?.addEventListener('click', async () => {
-    if (typeof addonApi.pickMediaFolder !== 'function') return;
-    const res = await addonApi.pickMediaFolder();
-    if (!res || !res.tracks || !res.tracks.length) {
-      if (res && res.folderPath) {
-        addonApi.toast('Keine unterstützten Audio-/Videodateien in diesem Ordner gefunden.', 'warning');
+    function togglePlay() {
+      if (!tracks.length) return;
+      if (isPlaying) {
+        isPlaying = false;
+        stopSynth();
+        if (audioEl) audioEl.pause();
+        if (playBtn) playBtn.textContent = '▶';
+        if (badgeEl) badgeEl.textContent = '● PAUSIERT';
+        renderPlaylist();
+        syncMiniPlayer();
+      } else {
+        startTrack(currentIndex, true);
       }
-      return;
     }
-    for (const f of res.tracks) {
-      tracks.push({
-        id: 'folder-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
-        title: f.name.replace(/\\.[^.]+$/, ''),
-        artist: res.folderPath,
-        kind: 'local',
-        url: f.fileUrl
-      });
+
+    function playNext() {
+      if (!tracks.length) return;
+      const nextIdx = shuffle ? Math.floor(Math.random() * tracks.length) : (currentIndex + 1) % tracks.length;
+      startTrack(nextIdx, true);
     }
-    await persistState();
-    renderPlaylist();
-    addonApi.toast(res.tracks.length + ' Titel aus Ordner importiert!', 'success');
-  });
 
-  addonRoot.querySelector('#music-restore-defaults')?.addEventListener('click', async () => {
-    tracks = [...DEFAULT_TRACKS];
-    currentIndex = 0;
-    await persistState();
-    renderPlaylist();
-    addonApi.toast('Standard-Radio- & Synth-Streams wiederhergestellt.', 'info');
-  });
+    function playPrev() {
+      if (!tracks.length) return;
+      startTrack((currentIndex - 1 + tracks.length) % tracks.length, true);
+    }
 
-  addonRoot.querySelector('#music-add-stream-form')?.addEventListener('submit', async (e) => {
-    e.preventDefault();
-    const titleInp = addonRoot.querySelector('#music-stream-title');
-    const urlInp = addonRoot.querySelector('#music-stream-url');
-    const url = (urlInp?.value || '').trim();
-    if (!url) return;
-    const title = (titleInp?.value || '').trim() || url.split('/').pop() || 'Eigener Stream';
-    tracks.push({
-      id: 'custom-' + Date.now(),
-      title,
-      artist: url,
-      kind: 'audio',
-      url
+    playBtn?.addEventListener('click', togglePlay);
+    nextBtn?.addEventListener('click', playNext);
+    prevBtn?.addEventListener('click', playPrev);
+    shuffleBtn?.addEventListener('click', () => {
+      shuffle = !shuffle;
+      shuffleBtn.classList.toggle('btn--primary', shuffle);
     });
-    if (titleInp) titleInp.value = '';
-    if (urlInp) urlInp.value = '';
-    await persistState();
-    renderPlaylist();
-    startTrack(tracks.length - 1, true);
-  });
+    repeatBtn?.addEventListener('click', () => {
+      repeat = !repeat;
+      repeatBtn.classList.toggle('btn--primary', repeat);
+    });
 
-  // Tab-Umschaltung (Audio-Deck <-> YouTube/Spotify Embed)
-  const tabBtns = addonRoot.querySelectorAll('[data-music-tab]');
-  const paneDeck = addonRoot.querySelector('#music-pane-deck');
-  const paneEmbed = addonRoot.querySelector('#music-pane-embed');
-  tabBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const target = btn.getAttribute('data-music-tab');
-      tabBtns.forEach((b) => b.classList.toggle('is-active', b === btn));
-      if (paneDeck) paneDeck.hidden = target !== 'deck';
-      if (paneEmbed) paneEmbed.hidden = target !== 'embed';
-      if (target === 'embed') {
-        const frame = addonRoot.querySelector('#music-yt-iframe');
-        if (frame && (!frame.src || frame.src === 'about:blank')) {
-          frame.src = frame.getAttribute('data-default-src') || 'https://www.youtube-nocookie.com/embed/jfKfPfyJRdk';
+    volEl?.addEventListener('input', () => {
+      const v = Number(volEl.value);
+      if (volLabel) volLabel.textContent = v + '%';
+      if (audioEl) audioEl.volume = v / 100;
+      persistState();
+    });
+
+    addonRoot.querySelector('#music-pick-files')?.addEventListener('click', async () => {
+      const files = await addonApi.pickMediaFiles();
+      if (!files || !files.length) return;
+      for (const f of files) {
+        tracks.push({
+          id: 'local-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          title: f.name.replace(/\\.[^.]+$/, ''),
+          artist: f.path,
+          kind: 'local',
+          url: f.fileUrl
+        });
+      }
+      await persistState();
+      renderPlaylist();
+      startTrack(tracks.length - files.length, true);
+      addonApi.toast(files.length + ' Musikdatei(en) hinzugefügt!', 'success');
+    });
+
+    addonRoot.querySelector('#music-pick-folder')?.addEventListener('click', async () => {
+      const res = await addonApi.pickMediaFolder();
+      if (!res || !res.tracks || !res.tracks.length) return;
+      for (const f of res.tracks) {
+        tracks.push({
+          id: 'folder-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          title: f.name.replace(/\\.[^.]+$/, ''),
+          artist: res.folderPath,
+          kind: 'local',
+          url: f.fileUrl
+        });
+      }
+      await persistState();
+      renderPlaylist();
+      startTrack(tracks.length - res.tracks.length, true);
+      addonApi.toast(res.tracks.length + ' Titel aus Ordner importiert!', 'success');
+    });
+
+    addonRoot.querySelector('#music-restore-defaults')?.addEventListener('click', async () => {
+      tracks = [...DEFAULT_TRACKS];
+      currentIndex = 0;
+      await persistState();
+      renderPlaylist();
+      addonApi.toast('Standard-Streams geladen.', 'info');
+    });
+
+    addonRoot.querySelector('#music-add-stream-form')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const tInp = addonRoot.querySelector('#music-stream-title');
+      const uInp = addonRoot.querySelector('#music-stream-url');
+      const rawUrl = (uInp?.value || '').trim();
+      if (!rawUrl) return;
+      tracks.push({
+        id: 'custom-' + Date.now(),
+        title: (tInp?.value || '').trim() || 'Eigener Stream',
+        artist: rawUrl,
+        kind: 'stream',
+        url: rawUrl
+      });
+      if (tInp) tInp.value = '';
+      if (uInp) uInp.value = '';
+      await persistState();
+      renderPlaylist();
+      startTrack(tracks.length - 1, true);
+    });
+
+    // Tab-Wechsel
+    const tabBtns = addonRoot.querySelectorAll('[data-music-tab]');
+    const paneDeck = addonRoot.querySelector('#music-pane-deck');
+    const paneEmbed = addonRoot.querySelector('#music-pane-embed');
+    tabBtns.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const target = btn.getAttribute('data-music-tab');
+        tabBtns.forEach((b) => b.classList.toggle('is-active', b === btn));
+        if (paneDeck) paneDeck.hidden = target !== 'deck';
+        if (paneEmbed) paneEmbed.hidden = target !== 'embed';
+        if (target === 'embed') {
+          const frame = addonRoot.querySelector('#music-yt-iframe');
+          if (frame && (!frame.src || frame.src === 'about:blank')) {
+            frame.src = frame.getAttribute('data-default-src') || 'https://www.youtube.com/embed/jfKfPfyJRdk?autoplay=1&rel=0&playsinline=1';
+          }
+        }
+      });
+    });
+
+    // YouTube / Spotify URL Parser (inkl. Voll-Player gegen VEVO/Mix-Sperren & Fehler 153)
+    function extractYouTubeInfo(rawInput) {
+      const val = String(rawInput || '').trim();
+      if (!val) return null;
+      if (/^[A-Za-z0-9_-]{11}$/.test(val)) {
+        return { videoId: val, listId: '', isRadioMix: false };
+      }
+      try {
+        const u = new URL(val);
+        const host = u.hostname.toLowerCase();
+        if (host.includes('youtu.be')) {
+          const id = u.pathname.replace(/^\\/+/, '').split('/')[0];
+          const listId = u.searchParams.get('list') || '';
+          if (id) return { videoId: id, listId, isRadioMix: listId.startsWith('RD') || u.searchParams.get('start_radio') === '1' };
+        }
+        if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
+          const vParam = u.searchParams.get('v');
+          const listId = u.searchParams.get('list') || '';
+          const isRadioMix = listId.startsWith('RD') || u.searchParams.get('start_radio') === '1';
+          if (vParam) return { videoId: vParam, listId, isRadioMix };
+          const pathMatch = u.pathname.match(/\\/(?:embed|shorts|live|v)\\/([A-Za-z0-9_-]{11})/);
+          if (pathMatch) return { videoId: pathMatch[1], listId, isRadioMix };
+        }
+      } catch { /* ignore */ }
+      const ytMatch = val.match(/(?:v=|youtu\\.be\\/|\\/embed\\/|\\/shorts\\/)([A-Za-z0-9_-]{11})/);
+      if (ytMatch) {
+        return { videoId: ytMatch[1], listId: '', isRadioMix: val.includes('list=RD') || val.includes('start_radio=1') };
+      }
+      return null;
+    }
+
+    function toStreamUrl(rawInput, mode = 'watch') {
+      const val = String(rawInput || '').trim();
+      if (!val) return '';
+      const spMatch = val.match(/open\\.spotify\\.com\\/(?:intl-[a-z]+\\/)?(track|playlist|album|episode)\\/([A-Za-z0-9]+)/);
+      if (spMatch) {
+        return 'https://open.spotify.com/embed/' + spMatch[1] + '/' + spMatch[2] + '?utm_source=generator&theme=0';
+      }
+      const yt = extractYouTubeInfo(val);
+      if (yt && yt.videoId) {
+        if (mode === 'watch') {
+          const listQuery = yt.listId ? '&list=' + encodeURIComponent(yt.listId) : '';
+          return 'https://www.youtube.com/watch?v=' + encodeURIComponent(yt.videoId) + listQuery;
+        }
+        if (mode === 'ytmusic') {
+          const listQuery = yt.listId ? '&list=' + encodeURIComponent(yt.listId) : '';
+          return 'https://music.youtube.com/watch?v=' + encodeURIComponent(yt.videoId) + listQuery;
+        }
+        const playlistParam = (yt.listId && !yt.isRadioMix) ? '&listType=playlist&list=' + encodeURIComponent(yt.listId) : '';
+        return 'https://www.youtube.com/embed/' + encodeURIComponent(yt.videoId) + '?autoplay=1&rel=0&playsinline=1&enablejsapi=1' + playlistParam;
+      }
+      return val;
+    }
+
+    const ytIframe = addonRoot.querySelector('#music-yt-iframe');
+    const ytInput = addonRoot.querySelector('#music-yt-input');
+    const ytModeSel = addonRoot.querySelector('#music-yt-mode');
+
+    function loadCurrentStream(overrideMode) {
+      if (overrideMode && ytModeSel) ytModeSel.value = overrideMode;
+      const mode = ytModeSel ? ytModeSel.value : 'watch';
+      const raw = (ytInput && ytInput.value.trim()) || 'https://www.youtube.com/watch?v=jfKfPfyJRdk';
+      const targetUrl = toStreamUrl(raw, mode);
+      if (!targetUrl) return;
+      if (ytIframe) ytIframe.src = targetUrl;
+    }
+
+    addonRoot.querySelectorAll('[data-yt-preset]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const url = btn.getAttribute('data-yt-preset');
+        if (ytInput && url) ytInput.value = url;
+        loadCurrentStream();
+      });
+    });
+
+    addonRoot.querySelector('#music-yt-switch-watch')?.addEventListener('click', () => loadCurrentStream('watch'));
+    addonRoot.querySelector('#music-yt-switch-embed')?.addEventListener('click', () => loadCurrentStream('embed'));
+    addonRoot.querySelector('#music-yt-switch-ytmusic')?.addEventListener('click', () => loadCurrentStream('ytmusic'));
+    ytModeSel?.addEventListener('change', () => {
+      if (ytInput && ytInput.value.trim()) loadCurrentStream();
+    });
+
+    addonRoot.querySelector('#music-yt-form')?.addEventListener('submit', (e) => {
+      e.preventDefault();
+      loadCurrentStream();
+      addonApi.toast('Stream im Player gestartet!', 'success');
+    });
+
+    // Visualizer
+    let phase = 0;
+    function drawVisualizer() {
+      if (ctx && canvas) {
+        const w = canvas.width;
+        const h = canvas.height;
+        ctx.clearRect(0, 0, w, h);
+        const bars = 28;
+        const barW = Math.floor((w - (bars - 1) * 3) / bars);
+        phase += isPlaying ? 0.14 : 0.02;
+        for (let i = 0; i < bars; i++) {
+          const ratio = isPlaying
+            ? 0.2 + 0.75 * Math.abs(Math.sin(phase + i * 0.35) * Math.cos(phase * 0.6 - i * 0.2))
+            : 0.08;
+          const barH = Math.max(4, Math.round(ratio * (h - 6)));
+          ctx.fillStyle = isPlaying ? '#e53935' : '#334155';
+          ctx.fillRect(i * (barW + 3), h - barH, barW, barH);
         }
       }
-    });
-  });
-
-  // YouTube / Spotify / Video URL Parser (unterstützt Watch-Links, Radio-Mixe &list=RD..., Shorts, youtu.be & Spotify)
-  function extractYouTubeInfo(rawInput) {
-    const val = String(rawInput || '').trim();
-    if (!val) return null;
-    if (/^[A-Za-z0-9_-]{11}$/.test(val)) {
-      return { videoId: val, listId: '', isRadioMix: false };
-    }
-    try {
-      const u = new URL(val);
-      const host = u.hostname.toLowerCase();
-      if (host.includes('youtu.be')) {
-        const id = u.pathname.replace(/^\\/+/, '').split('/')[0];
-        const listId = u.searchParams.get('list') || '';
-        if (id) return { videoId: id, listId, isRadioMix: listId.startsWith('RD') || u.searchParams.get('start_radio') === '1' };
-      }
-      if (host.includes('youtube.com') || host.includes('youtube-nocookie.com')) {
-        const vParam = u.searchParams.get('v');
-        const listId = u.searchParams.get('list') || '';
-        const isRadioMix = listId.startsWith('RD') || u.searchParams.get('start_radio') === '1';
-        if (vParam) return { videoId: vParam, listId, isRadioMix };
-        const pathMatch = u.pathname.match(/\\/(?:embed|shorts|live|v)\\/([A-Za-z0-9_-]{11})/);
-        if (pathMatch) return { videoId: pathMatch[1], listId, isRadioMix };
-      }
-    } catch {
-      /* fallback regex below */
-    }
-    const ytMatch = val.match(/(?:v=|youtu\\.be\\/|\\/embed\\/|\\/shorts\\/)([A-Za-z0-9_-]{11})/);
-    if (ytMatch) {
-      return { videoId: ytMatch[1], listId: '', isRadioMix: val.includes('list=RD') || val.includes('start_radio=1') };
-    }
-    return null;
-  }
-
-  function toEmbedUrl(rawInput, preferredMode = 'embed') {
-    const val = String(rawInput || '').trim();
-    if (!val) return '';
-
-    // Spotify Link -> Spotify Embed
-    const spMatch = val.match(/open\\.spotify\\.com\\/(?:intl-[a-z]+\\/)?(track|playlist|album|episode)\\/([A-Za-z0-9]+)/);
-    if (spMatch) {
-      return 'https://open.spotify.com/embed/' + spMatch[1] + '/' + spMatch[2] + '?utm_source=generator&theme=0';
-    }
-
-    const yt = extractYouTubeInfo(val);
-    if (yt && yt.videoId) {
-      if (preferredMode === 'watch') {
-        const listQuery = yt.listId ? '&list=' + encodeURIComponent(yt.listId) : '';
-        return 'https://www.youtube.com/watch?v=' + encodeURIComponent(yt.videoId) + listQuery;
-      }
-      if (preferredMode === 'ytmusic') {
-        const listQuery = yt.listId ? '&list=' + encodeURIComponent(yt.listId) : '';
-        return 'https://music.youtube.com/watch?v=' + encodeURIComponent(yt.videoId) + listQuery;
-      }
-      // Standard-Embed (mit Origin & Referer Fix gegen Fehler 153)
-      const playlistParam = (yt.listId && !yt.isRadioMix) ? '&listType=playlist&list=' + encodeURIComponent(yt.listId) : '';
-      return 'https://www.youtube.com/embed/' + encodeURIComponent(yt.videoId) + '?autoplay=1&rel=0&playsinline=1&enablejsapi=1' + playlistParam;
-    }
-
-    return val;
-  }
-
-  const ytIframe = addonRoot.querySelector('#music-yt-iframe');
-  const ytInput = addonRoot.querySelector('#music-yt-input');
-  const ytModeSel = addonRoot.querySelector('#music-yt-mode');
-
-  function loadCurrentStream(overrideMode) {
-    if (overrideMode && ytModeSel) ytModeSel.value = overrideMode;
-    const mode = ytModeSel ? ytModeSel.value : 'embed';
-    const raw = (ytInput && ytInput.value.trim()) || 'https://www.youtube.com/watch?v=jfKfPfyJRdk';
-    const embedUrl = toEmbedUrl(raw, mode);
-    if (!embedUrl) return;
-    if (ytIframe) ytIframe.src = embedUrl;
-    addonApi.setMiniPlayer({
-      active: true,
-      title: 'YouTube / Spotify Stream',
-      subtitle: mode === 'watch' ? 'YouTube Voll-Player aktiv' : (mode === 'ytmusic' ? 'YouTube Music aktiv' : 'Stream-Embed aktiv'),
-      playing: true,
-      onToggle: () => {
-        if (ytIframe) {
-          const cur = ytIframe.src;
-          ytIframe.src = cur === 'about:blank' ? embedUrl : 'about:blank';
-        }
-      },
-      onNext: () => loadCurrentStream()
-    });
-  }
-
-  addonRoot.querySelectorAll('[data-yt-preset]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const url = btn.getAttribute('data-yt-preset');
-      if (ytInput && url) ytInput.value = url;
-      if (ytIframe && url) ytIframe.src = url;
-    });
-  });
-
-  addonRoot.querySelector('#music-yt-switch-embed')?.addEventListener('click', () => {
-    loadCurrentStream('embed');
-    addonApi.toast('Auf Kompakt-Embed gewechselt.', 'info');
-  });
-
-  addonRoot.querySelector('#music-yt-switch-watch')?.addEventListener('click', () => {
-    loadCurrentStream('watch');
-    addonApi.toast('Auf YouTube Voll-Player (für VEVO & Radio-Mixe) gewechselt.', 'info');
-  });
-
-  ytModeSel?.addEventListener('change', () => {
-    if (ytInput && ytInput.value.trim()) loadCurrentStream();
-  });
-
-  addonRoot.querySelector('#music-yt-form')?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    loadCurrentStream();
-    addonApi.toast('Stream im Video-/Embed-Player gestartet.', 'success');
-  });
-
-  // 28-Band Live Canvas Visualizer
-  let animPhase = 0;
-  function drawVisualizer() {
-    if (ctx && canvas) {
-      const w = canvas.width;
-      const h = canvas.height;
-      ctx.clearRect(0, 0, w, h);
-      const bars = 28;
-      const gap = 3;
-      const barW = (w - gap * (bars - 1)) / bars;
-      animPhase += isPlaying ? 0.14 : 0.02;
-
-      for (let i = 0; i < bars; i++) {
-        const wave = isPlaying
-          ? (Math.sin(animPhase + i * 0.45) * 0.42 + Math.cos(animPhase * 1.7 - i * 0.3) * 0.35 + 0.35)
-          : 0.08;
-        const barH = Math.max(4, Math.min(h - 6, wave * (h - 10)));
-        const x = i * (barW + gap);
-        const y = h - barH;
-        const grad = ctx.createLinearGradient(0, y, 0, h);
-        grad.addColorStop(0, '#e53935');
-        grad.addColorStop(1, '#3b82f6');
-        ctx.fillStyle = isPlaying ? grad : '#2e3646';
-        ctx.fillRect(x, y, barW, barH);
-      }
+      requestAnimationFrame(drawVisualizer);
     }
     requestAnimationFrame(drawVisualizer);
+
+    renderPlaylist();
+    startTrack(0, false);
   }
-
-  renderPlaylist();
-  drawVisualizer();
-})();
+};
 `;
-
-function sanitizeAddonId(raw) {
-  return String(raw || '')
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]/g, '-')
-    .replace(/-+/g, '-')
-    .replace(/^-|-$/g, '')
-    .slice(0, 64) || `addon-${Date.now()}`;
-}
 
 function writeMusicAddonFiles(targetDir) {
   fs.mkdirSync(targetDir, { recursive: true });
-  fs.writeFileSync(path.join(targetDir, 'manifest.json'), JSON.stringify(MUSIC_ADDON_MANIFEST, null, 2), 'utf8');
-  fs.writeFileSync(path.join(targetDir, 'styles.css'), MUSIC_ADDON_CSS, 'utf8');
-  fs.writeFileSync(path.join(targetDir, 'view.html'), MUSIC_ADDON_HTML.trim() + '\n', 'utf8');
-  fs.writeFileSync(path.join(targetDir, 'script.js'), MUSIC_ADDON_JS.trim() + '\n', 'utf8');
+  // Entferne alte Mehrdateien-Struktur, falls noch vorhanden
+  for (const oldFile of ['manifest.json', 'styles.css', 'view.html', 'script.js']) {
+    const p = path.join(targetDir, oldFile);
+    try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch { /* ignore */ }
+  }
+  fs.writeFileSync(path.join(targetDir, 'musik-player-addon.js'), MUSIC_ADDON_SINGLE_JS, 'utf8');
+}
+
+/**
+ * Parst eine einzelne `.js`-Addon-Datei sicher und extrahiert das exportierte Objekt
+ * (`id`, `name`, `version`, `author`, `description`, `type`, `sidebar`, `styles`, `html`).
+ */
+function parseSingleJsAddonFile(jsFilePath) {
+  if (!jsFilePath || !fs.existsSync(jsFilePath)) return null;
+  const rawCode = fs.readFileSync(jsFilePath, 'utf8');
+  const transformed = rawCode
+    .replace(/^\s*export\s+default\s+/m, 'module.exports = ')
+    .replace(/^\s*export\s+const\s+addon\s*=/m, 'module.exports =');
+
+  const sandbox = {
+    module: { exports: {} },
+    exports: {},
+    window: {},
+    registerAddon(def) {
+      sandbox.module.exports = def;
+      return def;
+    },
+    console: { log() {}, warn() {}, error() {} }
+  };
+  sandbox.exports = sandbox.module.exports;
+
+  try {
+    vm.runInNewContext(transformed, sandbox, { timeout: 1000, filename: path.basename(jsFilePath) });
+  } catch {
+    return null;
+  }
+
+  const def = sandbox.module.exports;
+  if (!def || typeof def !== 'object') return null;
+  return { def, rawCode };
 }
 
 class AddonManager {
-  constructor({ userDataDir, stateFile, logger }) {
+  constructor({ userDataDir = os.tmpdir(), stateFile, logger } = {}) {
     this.userDataDir = userDataDir;
     this.primaryDir = resolvePrimaryAddonsDir(userDataDir);
     this.internalDir = path.join(userDataDir, 'addons');
@@ -1448,7 +1277,6 @@ class AddonManager {
           if (parsed.stateVersion === 2 && parsed.enabled && typeof parsed.enabled === 'object') {
             this._state.enabled = parsed.enabled;
           } else {
-            // Ab v2.4.4 sind alle Addons standardmäßig deaktiviert und werden manuell eingeschaltet
             this._state.enabled = {};
             this._state.stateVersion = 2;
             this._saveState();
@@ -1479,7 +1307,6 @@ class AddonManager {
       } catch { /* ignore */ }
     }
 
-    // Erstelle das vom Nutzer gewünschte Musik-Addon direkt unter C:\Users\lucsc\OneDrive\Desktop\MusikAddon
     if (process.platform === 'win32') {
       try {
         if (fs.existsSync(path.dirname(EXPLICIT_WINDOWS_MUSIC_ADDON_DIR))) {
@@ -1492,17 +1319,30 @@ class AddonManager {
       try {
         fs.mkdirSync(baseDir, { recursive: true });
 
-        const guidePath = path.join(baseDir, 'ANLEITUNG_ADDON_ERSTELLEN.md');
-        fs.writeFileSync(guidePath, GUIDE_MARKDOWN, 'utf8');
-
-        // 1. Beispiel-Addon: Notizen & SQL-Snippets (Sidebar-Icon unter SFTP)
-        const notesDir = path.join(baseDir, 'sqlhub-notes-addon');
-        fs.mkdirSync(notesDir, { recursive: true });
-        fs.writeFileSync(path.join(notesDir, 'manifest.json'), JSON.stringify(DEFAULT_NOTES_MANIFEST, null, 2), 'utf8');
-        const notesCssFile = path.join(notesDir, 'styles.css');
-        if (!fs.existsSync(notesCssFile)) {
-          fs.writeFileSync(notesCssFile, DEFAULT_NOTES_CSS, 'utf8');
+        // Entferne alte Mehrdateien-Unterordner aus früheren Versionen, damit nur noch 1-Datei-.js-Addons liegen
+        for (const legacyDir of ['emerald-matrix-theme', 'sqlhub-notes-addon', 'MusikAddon']) {
+          const legacyPath = path.join(baseDir, legacyDir);
+          try {
+            if (fs.existsSync(legacyPath) && fs.statSync(legacyPath).isDirectory()) {
+              fs.rmSync(legacyPath, { recursive: true, force: true });
+            }
+          } catch { /* ignore */ }
         }
+
+        // Schreibe ausführliche Anleitung
+        fs.writeFileSync(path.join(baseDir, 'ANLEITUNG_ADDON_ERSTELLEN.md'), GUIDE_MARKDOWN, 'utf8');
+
+        // 1. Single-File Addon: musik-player-addon.js
+        fs.writeFileSync(path.join(baseDir, 'musik-player-addon.js'), MUSIC_ADDON_SINGLE_JS, 'utf8');
+
+        // 2. Single-File Addon: notizen-snippets-addon.js
+        fs.writeFileSync(path.join(baseDir, 'notizen-snippets-addon.js'), NOTES_SINGLE_JS, 'utf8');
+
+        // 3. Single-File Addon: emerald-pixel-theme.js
+        fs.writeFileSync(path.join(baseDir, 'emerald-pixel-theme.js'), EMERALD_THEME_SINGLE_JS, 'utf8');
+
+        // 4. Single-File Starter-Vorlage: beispiel-eigenes-addon.js
+        fs.writeFileSync(path.join(baseDir, 'beispiel-eigenes-addon.js'), STARTER_EXAMPLE_SINGLE_JS, 'utf8');
 
         // Standard-Beispielnotizen beim allerersten Mal anlegen
         if (!this._state.storage['sqlhub-notes']) {
@@ -1514,35 +1354,13 @@ class AddonManager {
                 category: 'Allgemein',
                 pinned: true,
                 sql: 'SELECT table_name, table_rows, data_length\nFROM information_schema.tables\nWHERE table_schema = DATABASE()\nORDER BY data_length DESC;',
-                content: 'Dieses Werkzeug wird direkt über das Addon „sqlhub-notes“ im Ordner SQLHubAddons bereitgestellt. Du kannst hier beliebige Server-Notizen, Wartungs-Checklisten und häufige SQL-Abfragen speichern.',
-                updatedAt: new Date().toISOString()
-              },
-              {
-                id: 'welcome-note-2',
-                title: 'Benutzer & Rechte in MySQL / MariaDB prüfen',
-                category: 'SQL-Snippet',
-                pinned: false,
-                sql: 'SELECT User, Host, plugin FROM mysql.user;\nSHOW GRANTS FOR CURRENT_USER();',
-                content: 'Schnellabfrage zur Kontrolle der Datenbank-Benutzer und aktiven Berechtigungen in phpMyAdmin.',
+                content: 'Dieses Werkzeug wird direkt aus einer einzigen Datei (notizen-snippets-addon.js) geladen. Du kannst hier beliebige Server-Notizen und häufige SQL-Abfragen speichern.',
                 updatedAt: new Date().toISOString()
               }
             ]
           };
           this._saveState();
         }
-
-        // 2. Beispiel-Addon: Emerald Pixel Theme (Design-Addon)
-        const themeDir = path.join(baseDir, 'emerald-matrix-theme');
-        fs.mkdirSync(themeDir, { recursive: true });
-        fs.writeFileSync(path.join(themeDir, 'manifest.json'), JSON.stringify(DEFAULT_THEME_MANIFEST, null, 2), 'utf8');
-        const themeCssFile = path.join(themeDir, 'styles.css');
-        if (!fs.existsSync(themeCssFile)) {
-          fs.writeFileSync(themeCssFile, DEFAULT_THEME_CSS, 'utf8');
-        }
-
-        // 3. Musik- & Stream-Player Addon (Spotify / YouTube / Lokale MP3s)
-        const musicDir = path.join(baseDir, 'MusikAddon');
-        writeMusicAddonFiles(musicDir);
       } catch (err) {
         if (this.logger) this.logger.warn('Standard-Addons konnten nicht initialisiert werden.', { error: err.message });
       }
@@ -1553,56 +1371,44 @@ class AddonManager {
     return this.primaryDir;
   }
 
-  _readAddonFolder(addonFolder) {
-    const manifestPath = path.join(addonFolder, 'manifest.json');
-    if (!fs.existsSync(manifestPath)) return null;
-
-    const raw = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-    const id = sanitizeAddonId(raw.id || path.basename(addonFolder));
-    const styleFile = raw.styleFile || 'styles.css';
-    const stylePath = path.join(addonFolder, styleFile);
-    const cssContent = fs.existsSync(stylePath) ? fs.readFileSync(stylePath, 'utf8') : (raw.css || '');
+  _readSingleJsAddon(jsFilePath) {
+    const parsed = parseSingleJsAddonFile(jsFilePath);
+    if (!parsed) return null;
+    const { def, rawCode } = parsed;
+    const id = sanitizeAddonId(def.id || path.basename(jsFilePath, '.js'));
+    const cssContent = String(def.styles || def.css || '');
 
     let sidebar = null;
-    if (raw.sidebar && typeof raw.sidebar === 'object') {
-      const viewFile = raw.sidebar.viewFile || 'view.html';
-      const scriptFile = raw.sidebar.scriptFile || 'script.js';
-      const viewPath = path.join(addonFolder, viewFile);
-      const scriptPath = path.join(addonFolder, scriptFile);
+    if (def.sidebar && typeof def.sidebar === 'object') {
       sidebar = {
-        label: String(raw.sidebar.label || raw.name || 'Addon').slice(0, 24),
-        title: String(raw.sidebar.title || raw.name || 'Addon').slice(0, 80),
-        subtitle: String(raw.sidebar.subtitle || raw.description || '').slice(0, 140),
-        icon: String(raw.sidebar.icon || 'file-text'),
-        template: raw.sidebar.template || (fs.existsSync(viewPath) ? 'custom' : 'notes'),
-        keepAlive: Boolean(raw.sidebar.keepAlive),
-        htmlContent: fs.existsSync(viewPath) ? fs.readFileSync(viewPath, 'utf8') : (raw.sidebar.html || ''),
-        scriptContent: fs.existsSync(scriptPath) ? fs.readFileSync(scriptPath, 'utf8') : (raw.sidebar.script || '')
+        label: String(def.sidebar.label || def.name || 'Addon').slice(0, 24),
+        title: String(def.sidebar.title || def.name || 'Addon').slice(0, 80),
+        subtitle: String(def.sidebar.subtitle || def.description || '').slice(0, 140),
+        icon: String(def.sidebar.icon || 'file-text'),
+        template: def.sidebar.template || 'custom',
+        keepAlive: Boolean(def.sidebar.keepAlive),
+        htmlContent: String(def.html || def.sidebar.html || ''),
+        scriptContent: rawCode
       };
     }
 
-    // Wichtig: Addons sind standardmäßig immer deaktiviert (false) und müssen manuell aktiviert werden
     const enabled = Object.prototype.hasOwnProperty.call(this._state.enabled, id)
       ? Boolean(this._state.enabled[id])
       : false;
 
-    const files = fs.readdirSync(addonFolder).filter((f) => {
-      try { return fs.statSync(path.join(addonFolder, f)).isFile(); } catch { return false; }
-    });
-
     return {
       id,
-      name: String(raw.name || id).slice(0, 80),
-      version: String(raw.version || '1.0.0').slice(0, 24),
-      author: String(raw.author || 'Unbekannt').slice(0, 60),
-      description: String(raw.description || '').slice(0, 350),
-      type: ['tool', 'theme', 'hybrid'].includes(raw.type)
-        ? raw.type
+      name: String(def.name || id).slice(0, 80),
+      version: String(def.version || '1.0.0').slice(0, 24),
+      author: String(def.author || 'Eigenes Addon').slice(0, 60),
+      description: String(def.description || '').slice(0, 350),
+      type: ['tool', 'theme', 'hybrid'].includes(def.type)
+        ? def.type
         : (sidebar && cssContent ? 'hybrid' : (sidebar ? 'tool' : 'theme')),
-      permissions: Array.isArray(raw.permissions) ? raw.permissions.map(String) : [],
-      files,
+      permissions: Array.isArray(def.permissions) ? def.permissions.map(String) : ['single-file-js'],
+      files: [path.basename(jsFilePath)],
       enabled,
-      folderPath: addonFolder,
+      folderPath: jsFilePath,
       cssContent,
       sidebar
     };
@@ -1610,12 +1416,10 @@ class AddonManager {
 
   _scanDirectory(dirPath, map) {
     if (!dirPath || !fs.existsSync(dirPath)) return;
-    // Falls dirPath selbst direkt eine manifest.json besitzt (z. B. C:\Users\lucsc\OneDrive\Desktop\MusikAddon)
-    if (fs.existsSync(path.join(dirPath, 'manifest.json'))) {
-      try {
-        const single = this._readAddonFolder(dirPath);
-        if (single) map.set(single.id, single);
-      } catch { /* ignore */ }
+    const stat = fs.statSync(dirPath);
+    if (stat.isFile() && dirPath.toLowerCase().endsWith('.js')) {
+      const single = this._readSingleJsAddon(dirPath);
+      if (single) map.set(single.id, single);
       return;
     }
 
@@ -1627,13 +1431,11 @@ class AddonManager {
     }
 
     for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const addonFolder = path.join(dirPath, entry.name);
-      try {
-        const item = this._readAddonFolder(addonFolder);
-        if (item) map.set(item.id, item);
-      } catch (err) {
-        if (this.logger) this.logger.warn('Ungültiges Addon-Manifest übersprungen.', { folder: addonFolder, error: err.message });
+      if (entry.isFile() && entry.name.toLowerCase().endsWith('.js')) {
+        try {
+          const item = this._readSingleJsAddon(path.join(dirPath, entry.name));
+          if (item) map.set(item.id, item);
+        } catch { /* ignore */ }
       }
     }
   }
@@ -1648,36 +1450,37 @@ class AddonManager {
     return Array.from(map.values());
   }
 
-  /**
-   * Prüft einen Ordner oder eine manifest.json für das Custom-Installations-Fenster,
-   * bevor die eigentliche Installation ausgeführt wird.
-   */
   inspectFromPath(sourcePath) {
     if (!sourcePath || !fs.existsSync(sourcePath)) {
-      return { ok: false, errors: ['Der angegebene Ordner oder Pfad existiert nicht.'] };
+      return { ok: false, errors: ['Die angegebene .js-Datei existiert nicht.'] };
     }
+    let targetFile = sourcePath;
     const stat = fs.statSync(sourcePath);
-    const sourceDir = stat.isDirectory() ? sourcePath : path.dirname(sourcePath);
-    const manifestFile = path.join(sourceDir, 'manifest.json');
-    if (!fs.existsSync(manifestFile)) {
-      return { ok: false, errors: ['In diesem Ordner wurde keine „manifest.json“ gefunden.'] };
+    if (stat.isDirectory()) {
+      const jsFiles = fs.readdirSync(sourcePath).filter((f) => f.toLowerCase().endsWith('.js'));
+      if (jsFiles.length === 0) {
+        return { ok: false, errors: ['Keine .js Addon-Datei gefunden. Bitte wähle eine einzelne .js-Datei (z. B. meinaddon.js) aus.'] };
+      }
+      targetFile = path.join(sourcePath, jsFiles[0]);
     }
-    try {
-      const addon = this._readAddonFolder(sourceDir);
-      if (!addon) return { ok: false, errors: ['Manifest konnte nicht gelesen werden.'] };
-      const alreadyInstalled = this.list().some((a) => a.id === addon.id);
-      return {
-        ok: true,
-        addon: {
-          ...addon,
-          sourceDir,
-          targetDir: path.join(this.primaryDir, addon.id),
-          alreadyInstalled
-        }
-      };
-    } catch (err) {
-      return { ok: false, errors: ['Ungültiges Addon-Manifest: ' + err.message] };
+    if (!targetFile.toLowerCase().endsWith('.js')) {
+      return { ok: false, errors: ['Bitte wähle eine JavaScript-Datei (.js) wie z. B. meinaddon.js aus.'] };
     }
+
+    const addon = this._readSingleJsAddon(targetFile);
+    if (!addon) {
+      return { ok: false, errors: ['Die gewählte .js-Datei enthält kein gültiges SQL Hub Addon-Objekt (export default { id, name, ... }).'] };
+    }
+    const alreadyInstalled = this.list().some((a) => a.id === addon.id);
+    return {
+      ok: true,
+      addon: {
+        ...addon,
+        sourceDir: targetFile,
+        targetDir: path.join(this.primaryDir, `${addon.id}.js`),
+        alreadyInstalled
+      }
+    };
   }
 
   setEnabled(id, enabled) {
@@ -1708,166 +1511,101 @@ class AddonManager {
 
     const id = sanitizeAddonId(input.id || name);
     const type = ['tool', 'theme', 'hybrid'].includes(input.type) ? input.type : 'tool';
-    const targetFolder = path.join(this.primaryDir, id);
-    fs.mkdirSync(targetFolder, { recursive: true });
-
     const hasSidebar = type === 'tool' || type === 'hybrid';
-    const template = ['custom', 'music', 'notes'].includes(input.template) ? input.template : 'notes';
+    const template = ['custom', 'music', 'notes'].includes(input.template) ? input.template : 'custom';
+
+    fs.mkdirSync(this.primaryDir, { recursive: true });
+    const targetFile = path.join(this.primaryDir, `${id}.js`);
 
     if (template === 'music') {
-      writeMusicAddonFiles(targetFolder);
-      const customManifest = {
-        ...MUSIC_ADDON_MANIFEST,
-        id,
-        name: name.slice(0, 80),
-        author: String(input.author || 'Eigener Entwickler').trim() || 'Eigener Entwickler',
-        description: String(input.description || MUSIC_ADDON_MANIFEST.description).trim(),
-        sidebar: {
-          ...MUSIC_ADDON_MANIFEST.sidebar,
-          label: String(input.sidebarLabel || 'Musik').slice(0, 20),
-          title: name.slice(0, 80),
-          icon: String(input.sidebarIcon || 'music')
-        }
-      };
-      fs.writeFileSync(path.join(targetFolder, 'manifest.json'), JSON.stringify(customManifest, null, 2), 'utf8');
+      const customMusicJs = MUSIC_ADDON_SINGLE_JS
+        .replace("id: 'sqlhub-music-player'", `id: '${id}'`)
+        .replace("name: 'SQL Hub Musik & Stream Player'", `name: ${JSON.stringify(name)}`);
+      fs.writeFileSync(targetFile, customMusicJs, 'utf8');
       this._state.enabled[id] = false;
       this._saveState();
-      return { ok: true, folderPath: targetFolder, addons: this.list() };
-    }
-
-    const manifest = {
-      id,
-      name: name.slice(0, 80),
-      version: String(input.version || '1.0.0').trim() || '1.0.0',
-      author: String(input.author || 'Eigener Entwickler').trim() || 'Eigener Entwickler',
-      description: String(input.description || 'Eigenes SQL Hub Addon').trim(),
-      type,
-      enabledByDefault: false,
-      styleFile: 'styles.css',
-      permissions: hasSidebar ? ['sidebar', 'storage'] : ['theme-css']
-    };
-
-    if (hasSidebar) {
-      manifest.sidebar = {
-        label: String(input.sidebarLabel || name).slice(0, 20),
-        title: String(input.sidebarTitle || name).slice(0, 80),
-        subtitle: String(input.description || 'Eigenes Sidebar-Werkzeug unter SFTP').slice(0, 140),
-        icon: String(input.sidebarIcon || 'file-text'),
-        template: template === 'custom' ? 'custom' : 'notes',
-        keepAlive: Boolean(input.keepAlive)
-      };
-      if (template === 'custom') {
-        manifest.sidebar.viewFile = 'view.html';
-        manifest.sidebar.scriptFile = 'script.js';
-        const defaultHtml = input.customHtml || `<div class="panel">
-  <h2>${name}</h2>
-  <p class="panel__desc">${manifest.description}</p>
-  <div class="field">
-    <label>Eigene Notiz / Eingabe</label>
-    <textarea id="addon-custom-text" class="input" rows="8" placeholder="Hier schreiben …"></textarea>
-  </div>
-  <button type="button" class="btn btn--primary" id="addon-custom-save">Eingabe speichern</button>
-</div>`;
-        const defaultJs = input.customJs || `(async () => {
-  const ta = addonRoot.querySelector('#addon-custom-text');
-  const btn = addonRoot.querySelector('#addon-custom-save');
-  const stored = await addonApi.getStorage();
-  if (ta && stored && stored.text) ta.value = stored.text;
-  btn?.addEventListener('click', async () => {
-    await addonApi.setStorage({ text: ta ? ta.value : '' });
-    addonApi.toast('Gespeichert!', 'success');
-  });
-})();`;
-        fs.writeFileSync(path.join(targetFolder, 'view.html'), defaultHtml, 'utf8');
-        fs.writeFileSync(path.join(targetFolder, 'script.js'), defaultJs, 'utf8');
-      }
+      return { ok: true, folderPath: targetFile, addons: this.list() };
     }
 
     const css = String(input.customCss || (type === 'theme'
-      ? `/* Design-Regeln für ${name} */\n:root {\n  --primary: ${input.accentColor || '#3b82f6'} !important;\n}\n`
-      : `/* Styles für ${name} */\n`));
+      ? `:root {\n  --primary: ${input.accentColor || '#3b82f6'} !important;\n}`
+      : `.addon-box-${id} { padding: 16px; }`));
 
-    fs.writeFileSync(path.join(targetFolder, 'manifest.json'), JSON.stringify(manifest, null, 2), 'utf8');
-    fs.writeFileSync(path.join(targetFolder, 'styles.css'), css, 'utf8');
+    const singleFileCode = `// ${id}.js – Erstellt mit dem SQL Hub Single-File Addon-Baukasten
+// Du kannst diese eine Datei direkt in VS Code bearbeiten!
 
+export default {
+  id: ${JSON.stringify(id)},
+  name: ${JSON.stringify(name.slice(0, 80))},
+  version: ${JSON.stringify(String(input.version || '1.0.0').trim() || '1.0.0')},
+  author: ${JSON.stringify(String(input.author || 'Eigener Entwickler').trim() || 'Eigener Entwickler')},
+  description: ${JSON.stringify(String(input.description || 'Eigenes Single-File .js Addon').trim())},
+  type: ${JSON.stringify(type)},
+  ${hasSidebar ? `sidebar: {
+    label: ${JSON.stringify(String(input.sidebarLabel || name).slice(0, 20))},
+    title: ${JSON.stringify(String(input.sidebarTitle || name).slice(0, 80))},
+    subtitle: ${JSON.stringify(String(input.description || 'Geladen aus einer einzigen .js-Datei').slice(0, 140))},
+    icon: ${JSON.stringify(String(input.sidebarIcon || 'sparkles'))},
+    template: ${JSON.stringify(template === 'notes' ? 'notes' : 'custom')},
+    keepAlive: ${Boolean(input.keepAlive)}
+  },` : ''}
+  styles: ${JSON.stringify(css)},
+  ${hasSidebar && template !== 'notes' ? `html: \`
+    <div class="panel">
+      <h2>${name.replace(/`/g, '')}</h2>
+      <p class="panel__desc">Dieses Addon läuft komplett über die einzelne Datei <code>${id}.js</code>.</p>
+      <div class="field">
+        <label>Eigene Notiz / Eingabe</label>
+        <textarea id="addon-custom-text" class="input" rows="8" placeholder="Hier schreiben …"></textarea>
+      </div>
+      <button type="button" class="btn btn--primary" id="addon-custom-save">Eingabe speichern</button>
+    </div>
+  \`,
+  async mount(addonRoot, addonApi) {
+    const ta = addonRoot.querySelector('#addon-custom-text');
+    const btn = addonRoot.querySelector('#addon-custom-save');
+    const stored = await addonApi.getStorage();
+    if (ta && stored && stored.text) ta.value = stored.text;
+    btn?.addEventListener('click', async () => {
+      await addonApi.setStorage({ text: ta ? ta.value : '' });
+      addonApi.toast('In ${id}.js gespeichert!', 'success');
+    });
+  }` : ''}
+};
+`;
+
+    fs.writeFileSync(targetFile, singleFileCode, 'utf8');
     this._state.enabled[id] = false;
     this._saveState();
 
     return {
       ok: true,
-      folderPath: targetFolder,
+      folderPath: targetFile,
       addons: this.list()
     };
   }
 
   installFromPath(sourcePath) {
-    if (!sourcePath || !fs.existsSync(sourcePath)) {
-      return { ok: false, errors: ['Der ausgewählte Pfad existiert nicht.'] };
+    const inspected = this.inspectFromPath(sourcePath);
+    if (!inspected.ok || !inspected.addon) {
+      return { ok: false, errors: inspected.errors || ['Ungültige .js Addon-Datei.'] };
     }
-    const stat = fs.statSync(sourcePath);
-    const sourceDir = stat.isDirectory() ? sourcePath : path.dirname(sourcePath);
-    const manifestFile = path.join(sourceDir, 'manifest.json');
-
-    // Falls ein Sammel-Ordner gewählt wurde, der mehrere Addon-Unterordner mit manifest.json enthält
-    if (!fs.existsSync(manifestFile)) {
-      let subEntries = [];
-      try {
-        subEntries = fs.readdirSync(sourceDir, { withFileTypes: true });
-      } catch { /* ignore */ }
-      const subAddons = subEntries
-        .filter((e) => e.isDirectory() && fs.existsSync(path.join(sourceDir, e.name, 'manifest.json')))
-        .map((e) => path.join(sourceDir, e.name));
-
-      if (subAddons.length > 0) {
-        let lastId = '';
-        for (const subDir of subAddons) {
-          const r = this.installFromPath(subDir);
-          if (r && r.ok) lastId = r.id;
-        }
-        return {
-          ok: true,
-          id: lastId,
-          folderPath: this.primaryDir,
-          addons: this.list()
-        };
-      }
-
-      return {
-        ok: false,
-        errors: ['Im gewählten Ordner wurde keine „manifest.json“-Datei gefunden.']
-      };
+    const { addon } = inspected;
+    fs.mkdirSync(this.primaryDir, { recursive: true });
+    const destFile = path.join(this.primaryDir, `${addon.id}.js`);
+    if (path.resolve(addon.sourceDir) !== path.resolve(destFile)) {
+      fs.copyFileSync(addon.sourceDir, destFile);
     }
 
-    let raw;
-    try {
-      raw = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
-    } catch (err) {
-      return { ok: false, errors: ['Die manifest.json ist ungültig: ' + err.message] };
-    }
-
-    const id = sanitizeAddonId(raw.id || path.basename(sourceDir));
-    const destDir = path.join(this.primaryDir, id);
-
-    if (path.resolve(sourceDir) !== path.resolve(destDir)) {
-      fs.mkdirSync(destDir, { recursive: true });
-      const files = fs.readdirSync(sourceDir, { withFileTypes: true });
-      for (const f of files) {
-        if (f.isFile()) {
-          fs.copyFileSync(path.join(sourceDir, f.name), path.join(destDir, f.name));
-        }
-      }
-    }
-
-    // Standardmäßig beim Laden deaktiviert (Nutzer aktiviert Addons manuell per Schalter)
-    if (!Object.prototype.hasOwnProperty.call(this._state.enabled, id)) {
-      this._state.enabled[id] = false;
+    if (!Object.prototype.hasOwnProperty.call(this._state.enabled, addon.id)) {
+      this._state.enabled[addon.id] = false;
     }
     this._saveState();
 
     return {
       ok: true,
-      id,
-      folderPath: destDir,
+      id: addon.id,
+      folderPath: destFile,
       addons: this.list()
     };
   }

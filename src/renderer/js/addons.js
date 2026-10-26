@@ -260,9 +260,9 @@ export async function renderAddons() {
   root.innerHTML = `
     <div class="page-head">
       <div class="page-head__titles">
-        <div class="page-eyebrow">ERWEITERUNGEN, THEMES &amp; MULTIMEDIA-WERKZEUGE</div>
+        <div class="page-eyebrow">1-DATEI ADDON-SYSTEM (.JS) · ERWEITERUNGEN, THEMES &amp; MULTIMEDIA</div>
         <h1 class="page-title">Addons &amp; Baukasten</h1>
-        <p class="page-sub">Lade Addon-Ordner (mit <code>manifest.json</code> &amp; zugehörigen Dateien), durchsuche deine Erweiterungen und aktiviere sie manuell per Schalter</p>
+        <p class="page-sub">Erstelle in VS Code einfach eine einzige Datei (z. B. <code>meinaddon.js</code>), klicke auf <strong>+ Addon hinzufügen (.js wählen)</strong> und aktiviere dein Addon per Schalter</p>
       </div>
       <div class="page-head__actions">
         <button type="button" class="btn btn--ghost" id="addons-btn-rescan" title="Ordner SQLHubAddons neu einlesen">
@@ -273,17 +273,17 @@ export async function renderAddons() {
           ${icon('folder-open', 14)}
           <span>Ordner öffnen</span>
         </button>
-        <button type="button" class="btn btn--subtle" id="addons-btn-load-folder" title="Ordner mit manifest.json auswählen und Addon laden (startet deaktiviert)">
-          ${icon('folder', 14)}
-          <span>Ordner auswählen &amp; laden</span>
+        <button type="button" class="btn btn--primary" id="addons-btn-load-folder" title="Eine einzelne .js Addon-Datei (z. B. meinaddon.js) auswählen und installieren">
+          ${icon('plus', 15)}
+          <span>+ Addon hinzufügen (.js wählen)</span>
         </button>
         <button type="button" class="btn btn--subtle" id="addons-btn-install" title="Custom Addon-Installations-Assistent öffnen">
           ${icon('download', 14)}
           <span>Setup-Assistent</span>
         </button>
-        <button type="button" class="btn btn--primary" id="addons-btn-create">
-          ${icon('plus', 15)}
-          <span>Eigenes Addon erstellen</span>
+        <button type="button" class="btn btn--subtle" id="addons-btn-create">
+          ${icon('sparkles', 14)}
+          <span>Baukasten (.js generieren)</span>
         </button>
       </div>
     </div>
@@ -292,13 +292,13 @@ export async function renderAddons() {
       <div class="addons-summary-bar__item">
         <span class="addons-summary-bar__icon">${icon('blocks', 18)}</span>
         <div class="addons-summary-bar__text">
-          <strong>${addonState.addons.length} Addons geladen · ${enabledCount} aktiv (Standard: Deaktiviert)</strong>
+          <strong>${addonState.addons.length} Addons installiert · ${enabledCount} aktiv (1-Datei <code>.js</code> Architektur)</strong>
           <span>Hauptordner: <code>${escapeHtml(addonState.directory)}</code></span>
         </div>
       </div>
       <div class="addons-summary-bar__hint">
         ${icon('sparkles', 13)}
-        <span>Addons sind standardmäßig <strong>deaktiviert</strong>. Schalte ein Addon rechts per Schalter ein, um es unter <strong>SFTP</strong> anzuzeigen.</span>
+        <span>Addons bestehen aus <strong>nur 1 einzigen <code>.js</code>-Datei</strong> und sind standardmäßig <strong>deaktiviert</strong>, bis du sie per Schalter einschaltest.</span>
       </div>
     </div>
 
@@ -325,16 +325,16 @@ export async function renderAddons() {
           </div>`}
     </div>
 
-    <!-- Ausführliche Entwickler-Referenz direkt in der App -->
+    <!-- Ausführliche Entwickler-Referenz direkt in der App (1-Datei .js System) -->
     <div class="panel addons-guide-panel">
       <div class="addons-guide-head">
         <div>
-          <h2 style="margin:0;">${icon('terminal', 16)} Anleitung: Wie baue ich ein eigenes Addon (Theme, Werkzeug oder Musik-Player)?</h2>
-          <p class="panel__desc" style="margin:4px 0 0;">Im Ordner <code>${escapeHtml(addonState.directory)}</code> liegt die ausführliche Dokumentation <code>ANLEITUNG_ADDON_ERSTELLEN.md</code> sowie das Referenz-Projekt <code>MusikAddon</code>.</p>
+          <h2 style="margin:0;">${icon('terminal', 16)} Anleitung: Eigenes Addon in nur 1 einzigen Datei (<code>meinaddon.js</code>) erstellen</h2>
+          <p class="panel__desc" style="margin:4px 0 0;">Keine 3 oder 4 Einzeldateien nötig! Öffne VS Code, erstelle <code>meinaddon.js</code>, füge den Code unten ein und wähle die Datei oben über <strong>+ Addon hinzufügen (.js wählen)</strong> aus.</p>
         </div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;">
           <button type="button" class="btn btn--subtle btn--sm" id="addons-btn-open-music-folder">
-            ${icon('music', 13)} MusikAddon-Code öffnen
+            ${icon('music', 13)} musik-player-addon.js zeigen
           </button>
           <button type="button" class="btn btn--subtle btn--sm" id="addons-btn-open-guide">
             ${icon('folder-open', 13)} SQLHubAddons-Ordner öffnen
@@ -344,45 +344,60 @@ export async function renderAddons() {
 
       <div class="addons-guide-cols">
         <div class="addons-guide-box">
-          <div class="addons-guide-box__title">${icon('file-text', 14)} <span>1. <code>manifest.json</code> (Konfiguration &amp; KeepAlive)</span></div>
-          <pre class="addons-code-block">{
-  "id": "mein-musik-player",
-  "name": "Mein Musik &amp; Video Player",
-  "version": "1.0.0",
-  "author": "Dein Name",
-  "type": "tool",
-  "enabledByDefault": false,
-  "styleFile": "styles.css",
-  "sidebar": {
-    "label": "Musik",
-    "icon": "music",
-    "template": "custom",
-    "keepAlive": true,
-    "viewFile": "view.html",
-    "scriptFile": "script.js"
+          <div class="addons-guide-box__title">${icon('file-text', 14)} <span>Komplettes Beispiel: <code>meinaddon.js</code> (Alles in 1 Datei!)</span></div>
+          <pre class="addons-code-block">export default {
+  id: 'mein-eigenes-addon',
+  name: 'Mein eigenes Addon',
+  version: '1.0.0',
+  author: 'Dein Name',
+  description: 'Eigenes Sidebar-Werkzeug in nur einer .js Datei',
+  type: 'tool', // 'tool' | 'theme' | 'hybrid'
+  enabledByDefault: false,
+  sidebar: {
+    label: 'Mein Tool',
+    icon: 'rocket',
+    keepAlive: false
+  },
+  styles: \`
+    .mein-box { padding: 18px; border: 2px solid #2b303c; background: #14171e; }
+  \`,
+  html: \`
+    &lt;div class="mein-box"&gt;
+      &lt;h2&gt;Hallo aus meinaddon.js!&lt;/h2&gt;
+      &lt;button class="btn btn--primary" id="my-btn"&gt;Testen&lt;/button&gt;
+    &lt;/div&gt;
+  \`,
+  async mount(addonRoot, addonApi) {
+    addonRoot.querySelector('#my-btn')?.addEventListener('click', () =&gt; {
+      addonApi.toast('Mein 1-Datei-Addon läuft!', 'success');
+    });
   }
-}</pre>
+};</pre>
         </div>
 
         <div class="addons-guide-box">
-          <div class="addons-guide-box__title">${icon('music', 14)} <span>2. <code>script.js</code> (Audio, Lokale MP3s, YouTube &amp; Mini-Player)</span></div>
-          <pre class="addons-code-block">(async () =&gt; {
-  // Lokale MP3/WAV/MP4 Dateien per Dialog wählen:
-  const files = await addonApi.pickMediaFiles();
-  const audio = addonRoot.querySelector('#my-audio');
-  if (files.length) {
-    audio.src = files[0].fileUrl;
-    await audio.play();
-  }
-  // Schwebenden Mini-Player unten rechts aktivieren:
-  addonApi.setMiniPlayer({
-    active: true,
-    title: files[0]?.name || 'Live Stream',
-    subtitle: 'Spielt im Hintergrund weiter',
-    playing: true,
-    onToggle: () =&gt; audio.paused ? audio.play() : audio.pause()
-  });
-})();</pre>
+          <div class="addons-guide-box__title">${icon('music', 14)} <span>Verfügbare <code>addonApi</code> Funktionen in <code>mount(addonRoot, addonApi)</code></span></div>
+          <pre class="addons-code-block">// 1. Daten dauerhaft speichern &amp; laden:
+const data = await addonApi.getStorage();
+await addonApi.setStorage({ counter: 42 });
+
+// 2. Lokale MP3/WAV/FLAC/MP4 Dateien oder Ordner wählen:
+const tracks = await addonApi.pickMediaFiles();
+const folder = await addonApi.pickMediaFolder();
+
+// 3. Schwebenden Mini-Player unten rechts steuern:
+addonApi.setMiniPlayer({
+  active: true,
+  title: 'Synthwave Radio',
+  subtitle: 'Läuft im Hintergrund weiter',
+  playing: true,
+  onToggle: () =&gt; audio.paused ? audio.play() : audio.pause()
+});
+
+// 4. Zwischenablage, Instanzen &amp; Toast-Meldungen:
+await addonApi.copyClipboard('SELECT * FROM users;');
+const profiles = await addonApi.getProfiles();
+addonApi.toast('Gespeichert!', 'success');</pre>
         </div>
       </div>
     </div>
@@ -465,7 +480,7 @@ function bindAddonsPageEvents(root) {
   });
 
   root.querySelector('#addons-btn-open-music-folder')?.addEventListener('click', () => {
-    api.addons.openFolder('C:\\Users\\lucsc\\OneDrive\\Desktop\\MusikAddon');
+    api.addons.openFolder('C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\musik-player-addon.js');
   });
 
   const searchInput = root.querySelector('#addons-search-input');
@@ -503,8 +518,8 @@ function bindAddonsPageEvents(root) {
       await renderAddons();
       showToast({
         type: 'success',
-        title: 'Addon-Ordner geladen',
-        message: 'Das Addon wurde geladen (standardmäßig deaktiviert). Du kannst es jetzt per Schalter aktivieren.'
+        title: 'Addon (.js) installiert',
+        message: 'Deine .js Addon-Datei wurde installiert (standardmäßig deaktiviert). Du kannst das Addon jetzt per Schalter aktivieren.'
       });
     } else if (res.errors) {
       showToast({ type: 'error', message: res.errors.join(' ') });
@@ -577,48 +592,51 @@ export function openCustomInstallWizard(initialPath = '') {
         <div class="installer-steps">
           <div class="installer-step is-active" id="inst-step-1-badge">
             <span class="installer-step__num">1</span>
-            <span>Quellordner wählen</span>
+            <span>Addon-Datei (<code>.js</code>) wählen</span>
           </div>
           <span class="installer-step__sep">→</span>
           <div class="installer-step" id="inst-step-2-badge">
             <span class="installer-step__num">2</span>
-            <span>Manifest &amp; Rechte prüfen</span>
+            <span>Metadaten &amp; Rechte prüfen</span>
           </div>
           <span class="installer-step__sep">→</span>
           <div class="installer-step" id="inst-step-3-badge">
             <span class="installer-step__num">3</span>
-            <span>Installation &amp; Aktivierung</span>
+            <span>Installation in SQLHubAddons</span>
           </div>
         </div>
 
         <div class="field">
-          <label for="inst-source-path">Addon-Verzeichnis (Ordner mit <code>manifest.json</code>)</label>
+          <label for="inst-source-path">Addon-Datei (1-Datei <code>meinaddon.js</code>)</label>
           <div style="display:flex;gap:8px;">
-            <input type="text" class="input" id="inst-source-path" value="${escapeHtml(initialPath)}" placeholder="z. B. C:\\Users\\lucsc\\OneDrive\\Desktop\\MusikAddon" />
+            <input type="text" class="input" id="inst-source-path" value="${escapeHtml(initialPath)}" placeholder="z. B. C:\\Users\\lucsc\\OneDrive\\Desktop\\meinaddon.js" />
             <button type="button" class="btn btn--subtle" id="inst-btn-browse">
-              ${icon('folder-open', 14)} <span>Durchsuchen …</span>
+              ${icon('folder-open', 14)} <span>.js Datei wählen …</span>
             </button>
             <button type="button" class="btn btn--ghost" id="inst-btn-check">Prüfen</button>
           </div>
         </div>
 
         <div class="installer-quick-picks">
-          <span class="installer-quick-picks__label">Schnellauswahl:</span>
-          <button type="button" class="btn btn--xs btn--ghost" data-quick-path="C:\\Users\\lucsc\\OneDrive\\Desktop\\MusikAddon">
-            ${icon('music', 12)} <span>Desktop\\MusikAddon</span>
+          <span class="installer-quick-picks__label">Schnellauswahl (.js):</span>
+          <button type="button" class="btn btn--xs btn--ghost" data-quick-path="C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\musik-player-addon.js">
+            ${icon('music', 12)} <span>musik-player-addon.js</span>
           </button>
-          <button type="button" class="btn btn--xs btn--ghost" data-quick-path="C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\sqlhub-notes-addon">
-            ${icon('file-text', 12)} <span>sqlhub-notes-addon</span>
+          <button type="button" class="btn btn--xs btn--ghost" data-quick-path="C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\notizen-snippets-addon.js">
+            ${icon('file-text', 12)} <span>notizen-snippets-addon.js</span>
           </button>
-          <button type="button" class="btn btn--xs btn--ghost" data-quick-path="C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\emerald-matrix-theme">
-            ${icon('palette', 12)} <span>emerald-matrix-theme</span>
+          <button type="button" class="btn btn--xs btn--ghost" data-quick-path="C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\emerald-pixel-theme.js">
+            ${icon('palette', 12)} <span>emerald-pixel-theme.js</span>
+          </button>
+          <button type="button" class="btn btn--xs btn--ghost" data-quick-path="C:\\Users\\lucsc\\OneDrive\\Desktop\\SQLHubAddons\\beispiel-eigenes-addon.js">
+            ${icon('rocket', 12)} <span>beispiel-eigenes-addon.js</span>
           </button>
         </div>
 
         <div id="inst-preview-box" class="installer-preview-box">
           <div class="installer-preview-empty">
             ${icon('blocks', 24)}
-            <span>Wähle oben einen Addon-Ordner aus oder klicke auf einen Schnellauswahl-Pfad, um Paketdetails und Berechtigungen zu prüfen.</span>
+            <span>Wähle oben eine einzelne <code>.js</code> Addon-Datei (z. B. <code>meinaddon.js</code>) aus, um Metadaten und Berechtigungen vor der Installation zu prüfen.</span>
           </div>
         </div>
 
@@ -1376,11 +1394,26 @@ async function renderCustomAddonWorkspace(container, addon) {
       const moduleSource = `
         const { addonRoot, addonApi, addon } = window.__sqlhubAddonCtx[${JSON.stringify(ctxKey)}];
         delete window.__sqlhubAddonCtx[${JSON.stringify(ctxKey)}];
+        let __registeredAddon = null;
+        const module = { exports: {} };
+        const exports = module.exports;
+        const registerAddon = (def) => { __registeredAddon = def; return def; };
         ${addon.sidebar.scriptContent}
+        export const __sqlhubFallbackExport = __registeredAddon || (module.exports && Object.keys(module.exports).length ? module.exports : null);
       `;
       const blob = new Blob([moduleSource], { type: 'text/javascript' });
       const blobUrl = URL.createObjectURL(blob);
-      await import(blobUrl).finally(() => URL.revokeObjectURL(blobUrl));
+      const mod = await import(blobUrl).finally(() => URL.revokeObjectURL(blobUrl));
+      const def = (mod && mod.default) || (mod && mod.__sqlhubFallbackExport) || null;
+      if (def) {
+        if (typeof def.mount === 'function') {
+          await def.mount(mount, addonApi, addon);
+        } else if (typeof def.init === 'function') {
+          await def.init(mount, addonApi, addon);
+        } else if (typeof def === 'function') {
+          await def(mount, addonApi, addon);
+        }
+      }
     } catch (err) {
       showToast({ type: 'error', title: `Fehler im Addon ${addon.name}`, message: err.message });
     }
