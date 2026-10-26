@@ -36,7 +36,7 @@
     "dist:all": "electron-builder --win --linux tar.gz"
   },
   "devDependencies": {
-    "electron": "^37.2.0",
+    "electron": "^42.11.16",
     "electron-builder": "^26.0.12"
   },
   "allowScripts": {
