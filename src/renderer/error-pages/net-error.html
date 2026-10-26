@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline';" />
+  <title>Verbindungsfehler</title>
+  <style>
+    :root { color-scheme: dark; }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, -apple-system, sans-serif;
+      background:
+        radial-gradient(circle at 50% 20%, rgba(124, 92, 255, 0.12), transparent 55%),
+        #08090e;
+      color: #f0f2f8;
+      padding: 24px;
+      -webkit-font-smoothing: antialiased;
+    }
+    .card {
+      width: 100%;
+      max-width: 520px;
+      padding: 36px 34px 30px;
+      border-radius: 20px;
+      background: linear-gradient(180deg, rgba(24, 27, 38, 0.95) 0%, rgba(16, 18, 26, 0.98) 100%);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow:
+        inset 0 1px 0 rgba(255, 255, 255, 0.08),
+        0 28px 70px rgba(0, 0, 0, 0.65);
+      text-align: center;
+    }
+    .icon {
+      width: 56px;
+      height: 56px;
+      border-radius: 16px;
+      margin: 0 auto 18px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(245, 158, 11, 0.14);
+      border: 1px solid rgba(245, 158, 11, 0.28);
+      color: #fbbf24;
+    }
+    .eyebrow {
+      font-size: 10.5px;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      text-transform: uppercase;
+      color: #fbbf24;
+      margin-bottom: 6px;
+    }
+    h1 {
+      font-size: 21px;
+      font-weight: 700;
+      letter-spacing: -0.3px;
+      margin: 0 0 10px;
+    }
+    p {
+      color: #9ba3b8;
+      line-height: 1.55;
+      margin: 0 0 18px;
+      font-size: 13.5px;
+    }
+    code {
+      display: block;
+      word-break: break-all;
+      background: rgba(9, 10, 15, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      padding: 10px 14px;
+      font-family: "Cascadia Code", Consolas, monospace;
+      font-size: 12px;
+      color: #a5b4fc;
+      margin-bottom: 14px;
+    }
+    .hint {
+      font-size: 12.5px;
+      color: #7c859b;
+      margin-bottom: 8px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">
+      <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">
+        <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/>
+        <path d="M12 9v4"/>
+        <path d="M12 17h.01"/>
+      </svg>
+    </div>
+    <div class="eyebrow">VERBINDUNG UNTERBROCHEN</div>
+    <h1 id="title">Zielserver nicht erreichbar</h1>
+    <p id="message"></p>
+    <code id="url"></code>
+    <p class="hint" id="hint"></p>
+    <p class="hint">Nutze die Werkzeugleiste oben zum erneuten Laden. Deine isolierte Profil-Sitzung bleibt vollständig erhalten.</p>
+  </div>
+  <script>
+    (function () {
+      var params = new URLSearchParams(window.location.search);
+      var title = params.get('title');
+      var message = params.get('message');
+      var url = params.get('url');
+      var code = params.get('code');
+      var cert = params.get('cert') === '1';
+      if (title) document.getElementById('title').textContent = title;
+      if (message) document.getElementById('message').textContent = message;
+      document.getElementById('url').textContent = url || '';
+      document.getElementById('hint').textContent = cert
+        ? 'Das TLS-Zertifikat des Servers wird von diesem System nicht als vertrauenswürdig eingestuft. Einmaliges Fortfahren ist über die Sicherheitsmeldung oben rechts möglich.'
+        : (code ? 'Netzwerk-Fehlercode: ' + code : '');
+    })();
+  </script>
+</body>
+</html>

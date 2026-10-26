@@ -1,0 +1,72 @@
+appId: com.sqlhub.desktop
+productName: SQL Hub
+directories:
+  output: dist
+  buildResources: src/assets
+files:
+  - src/**/*
+  - package.json
+win:
+  icon: src/assets/icon.ico
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: ${productName}-Setup-${version}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  deleteAppDataOnUninstall: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: SQL Hub
+  include: src/assets/installer.nsh
+mac:
+  icon: src/assets/icon.png
+  category: public.app-category.developer-tools
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+    - target: pkg
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}-mac-${arch}.${ext}
+linux:
+  icon: src/assets/icon.png
+  category: Development;Database;
+  maintainer: SQL Hub <support@sqlhub.local>
+  synopsis: Studio-Verwaltung für phpMyAdmin- und Datenbank-Profile
+  target:
+    - target: AppImage
+      arch:
+        - x64
+        - arm64
+    - target: deb
+      arch:
+        - x64
+        - arm64
+    - target: rpm
+      arch:
+        - x64
+        - arm64
+    - target: pacman
+      arch:
+        - x64
+    - target: tar.gz
+      arch:
+        - x64
+        - arm64
+  artifactName: ${productName}-${version}-linux-${arch}.${ext}
+

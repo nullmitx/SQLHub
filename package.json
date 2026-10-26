@@ -1,0 +1,45 @@
+{
+  "name": "sql-hub",
+  "productName": "SQL Hub",
+  "version": "2.4.4",
+  "description": "Open-Source Cross-Platform-Desktop-App (Windows, macOS, Linux) im Pixel-Launcher-Design zur Verwaltung mehrerer phpMyAdmin-/Datenbank-Instanzen inkl. integriertem Termius-Stil SFTP-Client, Addon-System, isolierten Sitzungen, Touch ID & Passwort-Manager",
+  "homepage": "https://github.com/nullmitx/sqlhub",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/nullmitx/sqlhub.git"
+  },
+  "keywords": [
+    "sql-hub",
+    "phpmyadmin",
+    "database-manager",
+    "sftp-client",
+    "termius",
+    "electron",
+    "mysql",
+    "mariadb",
+    "password-manager"
+  ],
+  "main": "src/main/main.js",
+  "author": "SQL Hub Contributors",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dev": "electron . --dev",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "test:integration": "electron tests/integration/harness.js",
+    "test:renderer": "electron tests/integration/renderer-smoke.js",
+    "dist": "electron-builder --win",
+    "dist:win": "electron-builder --win",
+    "dist:portable": "electron-builder --win portable",
+    "dist:mac": "electron-builder --mac",
+    "dist:linux": "electron-builder --linux",
+    "dist:all": "electron-builder --win --linux tar.gz"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0",
+    "electron-builder": "^26.0.12"
+  },
+  "allowScripts": {
+    "electron@37.10.3": true
+  }
+}

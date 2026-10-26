@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html lang="de" data-theme="dark">
+<head>
+  <meta charset="utf-8" />
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; img-src 'self' data: blob: file: https: http:; media-src 'self' data: blob: file: https: http:; frame-src 'self' https: http:; style-src 'self' 'unsafe-inline'; script-src 'self' blob:; connect-src 'self' https: http: ws: wss:;" />
+  <title>SQL Hub</title>
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/dashboard.css" />
+  <link rel="stylesheet" href="styles/browser.css" />
+</head>
+<body>
+  <div class="app-bg" id="app-bg" aria-hidden="true">
+    <img class="app-bg__media" id="app-bg-media" alt="" decoding="async" hidden />
+  </div>
+  <div class="app-ambient" aria-hidden="true"></div>
+
+  <div class="app">
+    <!-- Durchgehende Kopfzeile (oben über die gesamte Fensterbreite) -->
+    <header class="titlebar">
+      <div class="titlebar__left">
+        <div class="titlebar__brand">
+          <span class="brand__mark" id="brand-mark" aria-hidden="true">
+            <img src="../assets/sqlhubnew.png" class="brand__logo-img" alt="" />
+          </span>
+          <span class="brand__name-row">
+            <span class="brand__name">SQL Hub</span>
+            <span class="brand__pixel-dot" aria-hidden="true"></span>
+          </span>
+        </div>
+
+        <div class="titlebar__crumb">
+          <span class="titlebar__crumb-icon" id="titlebar-icon" data-icon="layout-dashboard" data-icon-size="14"></span>
+          <span class="titlebar__title" id="titlebar-title">Dashboard</span>
+          <span class="titlebar__sep" aria-hidden="true">/</span>
+          <span class="titlebar__sub" id="titlebar-sub">Übersicht</span>
+        </div>
+      </div>
+
+      <div class="titlebar__right">
+        <button class="titlebar__cmd" id="btn-command-palette" title="Befehlspalette &amp; Schnellsuche öffnen (Strg + K)">
+          <span class="titlebar__cmd-icon" data-icon="search" data-icon-size="13"></span>
+          <span class="titlebar__cmd-label">Schnellsuche</span>
+          <kbd class="kbd cmd-trigger__kbd">Strg+K</kbd>
+        </button>
+
+        <button class="titlebar__action" id="btn-refresh-status" title="Erreichbarkeit aller Server jetzt prüfen" aria-label="Status aktualisieren">
+          <span data-icon="refresh-cw" data-icon-size="14"></span>
+        </button>
+
+        <div class="titlebar__security-chip" id="sidebar-security-card" title="Sicherheitsstatus &amp; App-Schutz">
+          <span class="sidebar__security-icon">
+            <span data-icon="shield-check" data-icon-size="14"></span>
+          </span>
+          <span class="sidebar__security-text">
+            <span class="sidebar__security-title" id="sidebar-sec-title">App-Schutz aktiv</span>
+            <span class="sidebar__security-sub" id="sidebar-sec-sub" hidden>Lokale Sicherung</span>
+          </span>
+          <button class="sidebar__lock-btn" id="sidebar-lock-btn" title="App sofort sperren" aria-label="App sofort sperren" hidden>
+            <span data-icon="lock" data-icon-size="13"></span>
+          </button>
+        </div>
+
+        <div class="window-controls">
+          <button class="winbtn" id="win-min" title="Minimieren" aria-label="Minimieren">
+            <svg viewBox="0 0 12 12" width="11" height="11"><path d="M2 6h8" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+          </button>
+          <button class="winbtn" id="win-max" title="Maximieren" aria-label="Maximieren">
+            <svg viewBox="0 0 12 12" width="11" height="11"><rect x="2" y="2" width="8" height="8" fill="none" stroke="currentColor" stroke-width="1.5"/></svg>
+          </button>
+          <button class="winbtn winbtn--close" id="win-close" title="Schließen" aria-label="Schließen">
+            <svg viewBox="0 0 12 12" width="11" height="11"><path d="M2.5 2.5l7 7M9.5 2.5l-7 7" stroke="currentColor" stroke-width="1.5" stroke-linecap="square"/></svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Hauptkörper: Vertikale Launcher-Icon-Leiste links + Arbeitsbereich rechts -->
+    <div class="app-body">
+      <aside class="sidebar">
+        <nav class="sidebar__nav" aria-label="Hauptnavigation">
+          <button class="nav-item" id="nav-dashboard" data-view="dashboard" title="Start &amp; Schnellstart">
+            <span class="nav-item__icon" data-icon="layout-dashboard" data-icon-size="19"></span>
+            <span class="nav-item__label">Start</span>
+          </button>
+          <button class="nav-item" id="nav-profiles" data-view="profiles" title="Datenbankprofile &amp; Instanzen">
+            <span class="nav-item__icon" data-icon="database" data-icon-size="19"></span>
+            <span class="nav-item__label">Instanzen</span>
+            <span class="nav-item__count" id="nav-profile-count">0</span>
+          </button>
+          <button class="nav-item" id="nav-browser" data-view="browser" title="Aktive Datenbank-Sitzungen" hidden>
+            <span class="nav-item__icon" data-icon="globe" data-icon-size="19"></span>
+            <span class="nav-item__label">Sitzungen</span>
+            <span class="nav-item__count nav-item__count--live" id="nav-browser-count">0</span>
+          </button>
+          <button class="nav-item" id="nav-sftp" data-view="sftp" title="SFTP-Client &amp; Server-Dateitransfer (Termius-Stil)">
+            <span class="nav-item__icon" data-icon="terminal" data-icon-size="19"></span>
+            <span class="nav-item__label">SFTP</span>
+            <span class="nav-item__count" id="nav-sftp-count" hidden>0</span>
+          </button>
+          <div class="sidebar__addon-slot" id="sidebar-addon-items"></div>
+        </nav>
+
+        <div class="sidebar__spacer"></div>
+
+        <nav class="sidebar__nav sidebar__nav--bottom" aria-label="Systemnavigation">
+          <button class="nav-item" id="nav-addons" data-view="addons" title="Addons &amp; Erweiterungen verwalten">
+            <span class="nav-item__icon" data-icon="blocks" data-icon-size="19"></span>
+            <span class="nav-item__label">Addons</span>
+            <span class="nav-item__count" id="nav-addons-count" hidden>0</span>
+          </button>
+          <button class="nav-item" id="nav-passwords" data-view="passwords" title="Passwort-Manager (Zusätzlicher Zugriffsschutz)">
+            <span class="nav-item__icon" data-icon="key-round" data-icon-size="19"></span>
+            <span class="nav-item__label">Tresor</span>
+          </button>
+          <button class="nav-item" id="btn-settings" data-view="settings" title="Einstellungen &amp; Darstellung">
+            <span class="nav-item__icon" data-icon="settings" data-icon-size="19"></span>
+            <span class="nav-item__label">Optionen</span>
+          </button>
+          <button class="nav-item" data-view="about" title="Über SQL Hub &amp; Systemstatus">
+            <span class="nav-item__icon" data-icon="info" data-icon-size="19"></span>
+            <span class="nav-item__label">System</span>
+          </button>
+        </nav>
+
+        <div class="sidebar__bottom">
+          <button class="sidebar__emblem-btn" id="sidebar-cmd-btn" title="Schnellbefehle &amp; Suche öffnen (Strg + K)" aria-label="Schnellbefehle öffnen">
+            <img src="../assets/sqlhubnew.png" class="sidebar__emblem-img" alt="SQL Hub" />
+          </button>
+        </div>
+      </aside>
+
+      <!-- Hauptbereich -->
+      <div class="main">
+        <!-- Dashboard (Launcher-Ansicht) -->
+        <section class="view view--dashboard" id="view-dashboard">
+          <!-- Launcher Showcase & Quick-Play Dock -->
+          <div class="launcher-stage" id="launcher-stage">
+            <div class="launcher-hero">
+              <div class="launcher-hero__sky" aria-hidden="true">
+                <span class="pixel-cloud pixel-cloud--1"></span>
+                <span class="pixel-cloud pixel-cloud--2"></span>
+                <span class="pixel-cloud pixel-cloud--3"></span>
+                <span class="pixel-moon"></span>
+              </div>
+
+              <div class="launcher-hero__center">
+                <div class="launcher-hero__nameplate" id="launcher-hero-nameplate">SQL HUB</div>
+                <div class="launcher-hero__monolith" aria-hidden="true">
+                  <div class="pixel-server-tower" id="launcher-hero-emblem">
+                    <img src="../assets/sqlhubnew.png" class="launcher-hero__logo-img" alt="SQL Hub" />
+                  </div>
+                </div>
+              </div>
+
+              <div class="launcher-hero__dock">
+                <div class="launcher-launch-wrap">
+                  <div class="launcher-version-tag" id="launcher-active-badge">
+                    <span id="launcher-active-icon" data-icon="database" data-icon-size="12"></span>
+                    <span id="launcher-active-cat">phpMyAdmin</span>
+                  </div>
+                  <div class="launcher-split-btn">
+                    <button type="button" class="launcher-play-btn" id="launcher-play-btn" title="Ausgewählte Datenbank-Instanz starten">
+                      <span class="launcher-play-btn__tri" aria-hidden="true">▶</span>
+                      <span class="launcher-play-btn__text">
+                        <strong id="launcher-play-title">Instanz starten</strong>
+                        <small id="launcher-play-sub">Bereit zum Verbinden</small>
+                      </span>
+                    </button>
+                    <button type="button" class="launcher-switch-btn" id="launcher-switch-btn" title="Andere Instanz wählen oder neues Profil anlegen" aria-label="Instanz wechseln">
+                      <span data-icon="arrow-left-right" data-icon-size="16"></span>
+                    </button>
+                  </div>
+                </div>
+
+                <div class="launcher-quickbar" id="launcher-quickbar">
+                  <span class="launcher-quickbar__label">SCHNELL STARTEN</span>
+                  <div class="launcher-quickbar__list" id="launcher-quickbar-list"></div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Rechte Launcher-Seitenleiste (Status & Instanz-Übersicht wie im Launcher) -->
+            <div class="launcher-sidepanels">
+              <div class="launcher-box">
+                <div class="launcher-box__head">
+                  <span class="launcher-box__title">VERBINDUNGEN</span>
+                  <button type="button" class="launcher-box__action" id="btn-add-profile">
+                    <span data-icon="plus" data-icon-size="12"></span>
+                    <span>HINZUFÜGEN</span>
+                  </button>
+                </div>
+                <div class="stats" id="dash-stats"></div>
+              </div>
+
+              <div class="launcher-box launcher-box--grow">
+                <div class="launcher-box__head">
+                  <span class="launcher-box__title">FILTER &amp; SUCHE</span>
+                  <span class="launcher-box__sub" id="dashboard-sub">Alle Instanzen</span>
+                </div>
+                <div class="launcher-filter-stack">
+                  <div class="search">
+                    <span data-icon="search" data-icon-size="15"></span>
+                    <input type="search" id="search-input" placeholder="Instanz, Host oder DB filtern …" aria-label="Profile durchsuchen" />
+                  </div>
+                  <div class=" launcher-toolbar-row">
+                    <div class="filter-pills" id="dash-filters" role="tablist" aria-label="Profilfilter">
+                      <button class="filter-pill is-active" data-filter="all">Alle</button>
+                      <button class="filter-pill" data-filter="favorites">Favoriten</button>
+                      <button class="filter-pill" data-filter="online">Online</button>
+                      <button class="filter-pill" data-filter="locked">Geschützt</button>
+                    </div>
+                    <div class="view-toggle" id="dash-view-toggle" role="group" aria-label="Ansichtsmodus">
+                      <button class="view-toggle__btn is-active" data-layout="grid" title="Kartenansicht" aria-label="Kartenansicht">
+                        <span data-icon="layout-grid" data-icon-size="14"></span>
+                      </button>
+                      <button class="view-toggle__btn" data-layout="list" title="Kompaktliste" aria-label="Kompaktliste">
+                        <span data-icon="list" data-icon-size="14"></span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <div class="section-head__left">
+              <h2>DATENBANK-INSTANZEN</h2>
+            </div>
+          </div>
+
+          <div class="profile-grid" id="profile-grid" role="list"></div>
+
+          <div class="empty-state" id="empty-state" hidden>
+            <div class="empty-state__glow" aria-hidden="true"></div>
+            <div class="empty-state__icon" data-icon="database" data-icon-size="30"></div>
+            <h2>KEINE INSTANZEN HINTERLEGT</h2>
+            <p>Lege deine erste phpMyAdmin- oder Datenbank-Instanz an, um sie direkt über den Launcher zu starten.</p>
+            <div class="empty-state__actions">
+              <button class="btn btn--primary" id="btn-add-profile-empty">
+                <span data-icon="plus" data-icon-size="15"></span> Erste Instanz anlegen
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Datenbankprofile -->
+        <section class="view view--profiles" id="view-profiles" hidden>
+          <div class="page-head">
+            <div class="page-head__titles">
+              <div class="page-eyebrow">INSTANZ-VERWALTUNG</div>
+              <h1 class="page-title">Datenbankprofile</h1>
+              <p class="page-sub" id="profiles-sub">Verwalte, gruppiere und starte deine gespeicherten Datenbank-Instanzen</p>
+            </div>
+            <div class="page-head__actions">
+              <div class="search">
+                <span data-icon="search" data-icon-size="15"></span>
+                <input type="search" id="profiles-search" placeholder="Name, Host, Kategorie suchen …" aria-label="Profile durchsuchen" />
+              </div>
+              <div class="select-wrap">
+                <select id="profiles-sort" aria-label="Sortierung">
+                  <option value="recent">Zuletzt geöffnet</option>
+                  <option value="favorites">Favoriten zuerst</option>
+                  <option value="name">Name (A–Z)</option>
+                  <option value="category">Kategorie</option>
+                  <option value="created">Zuletzt erstellt</option>
+                </select>
+                <span data-icon="chevron-down" data-icon-size="14"></span>
+              </div>
+              <div class="view-toggle" id="profiles-view-toggle" role="group" aria-label="Ansichtsmodus">
+                <button class="view-toggle__btn is-active" data-layout="grid" title="Kartenansicht" aria-label="Kartenansicht">
+                  <span data-icon="layout-grid" data-icon-size="14"></span>
+                </button>
+                <button class="view-toggle__btn" data-layout="list" title="Kompaktliste" aria-label="Kompaktliste">
+                  <span data-icon="list" data-icon-size="14"></span>
+                </button>
+              </div>
+              <button class="btn btn--primary" id="btn-add-profile-2">
+                <span data-icon="plus" data-icon-size="15"></span>
+                <span>Profil anlegen</span>
+              </button>
+            </div>
+          </div>
+
+          <div class="section-head">
+            <div class="filter-pills" id="profiles-filters" role="tablist" aria-label="Profilfilter">
+              <button class="filter-pill is-active" data-filter="all">Alle Profile</button>
+              <button class="filter-pill" data-filter="favorites">Favoriten</button>
+              <button class="filter-pill" data-filter="online">Erreichbar</button>
+              <button class="filter-pill" data-filter="locked">Passwortgeschützt</button>
+            </div>
+          </div>
+
+          <div class="profile-grid" id="profiles-grid" role="list"></div>
+
+          <div class="empty-state" id="profiles-empty" hidden>
+            <div class="empty-state__glow" aria-hidden="true"></div>
+            <div class="empty-state__icon" data-icon="database" data-icon-size="30"></div>
+            <h2>NOCH KEINE DATENBANKPROFILE</h2>
+            <p>Lege dein erstes phpMyAdmin-Profil an, um mit einem Klick sicher und ohne Sitzungskonflikte auf deine Datenbank zuzugreifen.</p>
+            <div class="empty-state__actions">
+              <button class="btn btn--primary" id="btn-add-profile-2-empty">
+                <span data-icon="plus" data-icon-size="15"></span> Erstes Profil anlegen
+              </button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Browser -->
+        <section class="view view--browser" id="view-browser" hidden>
+          <div class="browser-chrome">
+            <div class="browser-tabs-bar">
+              <div class="browser-tabs" id="browser-tabs" role="tablist"></div>
+              <button class="browser-tabs__add" id="browser-tab-new" title="Weiteres Profil öffnen (Strg + K)" aria-label="Weiteres Profil öffnen">
+                <span data-icon="plus" data-icon-size="14"></span>
+              </button>
+            </div>
+            <div class="browser-toolbar">
+              <div class="browser-nav">
+                <button class="toolbtn" id="nav-back" title="Zurück (Alt + ←)" aria-label="Zurück" data-icon="arrow-left" data-icon-size="16"></button>
+                <button class="toolbtn" id="nav-forward" title="Vorwärts (Alt + →)" aria-label="Vorwärts" data-icon="arrow-right" data-icon-size="16"></button>
+                <button class="toolbtn" id="nav-reload" title="Seite neu laden (Strg + R)" aria-label="Neu laden" data-icon="rotate-cw" data-icon-size="15"></button>
+                <button class="toolbtn" id="nav-home" title="Zur hinterlegten Start-URL des Profils" aria-label="Startseite" data-icon="house" data-icon-size="15"></button>
+              </div>
+              <div class="urlbar">
+                <span class="urlbar__lock" id="url-lock" title="Verbindungssicherheit"></span>
+                <input type="text" id="url-input" spellcheck="false" placeholder="https://server.example.com/phpmyadmin/" aria-label="Adresse" />
+                <span class="urlbar__spinner" id="url-spinner" hidden></span>
+                <button class="urlbar__action" id="url-copy" title="Aktuelle URL in Zwischenablage kopieren" aria-label="URL kopieren">
+                  <span data-icon="copy" data-icon-size="13"></span>
+                </button>
+              </div>
+              <div class="browser-nav browser-nav--right">
+                <button class="toolbtn toolbtn--pill" id="nav-autologin" title="Automatische Anmeldung auf dieser Seite erneut ausführen" aria-label="Auto-Login erneut versuchen">
+                  <span data-icon="user-check" data-icon-size="14"></span>
+                  <span>Auto-Login</span>
+                </button>
+                <button class="toolbtn toolbtn--danger" id="browser-close" title="Aktive Sitzung schließen" aria-label="Browser schließen" data-icon="x" data-icon-size="16"></button>
+              </div>
+            </div>
+            <div class="browser-progress" id="browser-progress" hidden></div>
+          </div>
+          <!-- Hier wird die native WebContentsView platziert -->
+          <div class="browser-placeholder" id="browser-placeholder">
+            <div class="browser-placeholder__inner">
+              <div class="browser-placeholder__icon" data-icon="globe" data-icon-size="26"></div>
+              <div class="browser-placeholder__title">VERBINDUNG WIRD HERGESTELLT</div>
+              <div class="browser-placeholder__hint" id="browser-hint">
+                <span class="spinner"></span> Isolierte phpMyAdmin-Sitzung wird geladen …
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- SFTP & Dateitransfer (Termius-Stil) -->
+        <section class="view view--sftp" id="view-sftp" hidden></section>
+
+        <!-- Addons & Erweiterungen -->
+        <section class="view view--addons" id="view-addons" hidden></section>
+
+        <!-- Dynamische Addon-Werkzeug-Ansicht (unter SFTP) -->
+        <section class="view view--addon-custom" id="view-addon-custom" hidden></section>
+
+        <!-- Passwort-Manager (Zusätzlicher Zugriffsschutz) -->
+        <section class="view view--passwords" id="view-passwords" hidden></section>
+
+        <!-- Einstellungen -->
+        <section class="view view--settings" id="view-settings" hidden></section>
+
+        <!-- Über SQL Hub -->
+        <section class="view view--about" id="view-about" hidden></section>
+      </div>
+    </div>
+  </div>
+
+  <div id="modal-root"></div>
+  <div class="toast-root" id="toast-root"></div>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

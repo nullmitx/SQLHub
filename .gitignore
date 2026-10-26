@@ -1,0 +1,26 @@
+# Dependencies
+node_modules/
+
+# Build & Release Artifacts
+dist/
+out/
+build/
+
+# Runtime & OS Files
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Editor & Local Environment
+.vscode/
+.idea/
+*.swp
+*.swo
+.env
+.env.*
+
+# Test & Coverage Temporary Data
+coverage/
+.nyc_output/
